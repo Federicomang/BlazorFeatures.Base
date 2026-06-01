@@ -10,28 +10,6 @@ namespace BlazorFeatures.Abstractions.Extensions
     {
         public static IServiceCollection AddFeatures(this IServiceCollection services, Action<FeatureConfigBuilder>? configure = null)
         {
-            services.AddScoped<IFeatureService, FeatureService>();
-
-            var builder = new FeatureConfigBuilder();
-
-            configure?.Invoke(builder);
-
-            var options = new FeatureApplicationOptions()
-            {
-                ApplicationRenderType = builder.ApplicationRenderType,
-                JsonSerializerOptions = builder.JsonSerializerOptions ?? JsonSerializerOptions.Default
-            };
-
-            services.AddSingleton(options);
-            services.AddCascadingValue(Constants.ApplicationRenderTypeKey, sp => options.ApplicationRenderType);
-            services.AddCascadingValue(Constants.JsonSerializerOptionsKey, sp => options.JsonSerializerOptions);
-
-            foreach (var option in builder.FeatureOptions)
-            {
-                services.AddSingleton(option);
-                services.AddSingleton(option.GetType(), option);
-            }
-
             var baseFeatureType = typeof(IBaseFeature<,>);
             var currentRenderType = Constants.IsClientEnvironment ? RenderType.Client : RenderType.Server;
             var typesWithHandler = new List<Type>();
@@ -80,15 +58,30 @@ namespace BlazorFeatures.Abstractions.Extensions
                 }
             }
 
+            var builder = new FeatureConfigBuilder();
+            configure?.Invoke(builder);
+
+            var options = new FeatureApplicationOptions()
+            {
+                ApplicationRenderType = builder.ApplicationRenderType,
+                JsonSerializerOptions = builder.JsonSerializerOptions ?? JsonSerializerOptions.Default
+            };
+
+            services.AddScoped<IFeatureService, FeatureService>();
+            services.AddSingleton(new FeatureRootComponentsManager(featureRootComponents));
+            services.AddSingleton(options);
+            services.AddCascadingValue(Constants.ApplicationRenderTypeKey, sp => options.ApplicationRenderType);
+            services.AddCascadingValue(Constants.JsonSerializerOptionsKey, sp => options.JsonSerializerOptions);
+
+            foreach (var option in builder.FeatureOptions)
+            {
+                services.AddSingleton(option);
+                services.AddSingleton(option.GetType(), option);
+            }
+
             foreach (var type in typesWithHandler)
             {
                 FeatureRegistrationHandlerRunner.InvokeBefore(type, services);
-            }
-
-            foreach (var type in featureRootComponents)
-            {
-                services.AddSingleton(type);
-                services.AddSingleton(typeof(IFeatureRootComponent), type);
             }
 
             foreach (var (Interfaces, Implementation, Lifetime) in featureTypes)
