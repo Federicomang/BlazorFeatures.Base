@@ -35,47 +35,60 @@ namespace BlazorFeatures.Abstractions.Extensions
             var baseFeatureType = typeof(IBaseFeature<,>);
             var currentRenderType = Constants.IsClientEnvironment ? RenderType.Client : RenderType.Server;
             var typesWithHandler = new List<Type>();
-            var featureTypes = AppDomain.CurrentDomain.GetAssemblies()
-                .Where(x =>
+            var featureRootComponents = new List<Type>();
+            var featureTypes = new List<(List<Type> Interfaces, Type Implementation, ServiceLifetime Lifetime)>();
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var renderType = assembly.GetCustomAttribute<FeatureAssemblyAttribute>()?.RenderType;
+                if (renderType == RenderType.Both || renderType == currentRenderType)
                 {
-                    var renderType = x.GetCustomAttribute<FeatureAssemblyAttribute>()?.RenderType;
-                    return renderType == RenderType.Both || renderType == currentRenderType;
-                })
-                .SelectMany(assembly =>
-                    assembly.GetTypes().Where(type => !type.IsAbstract && !type.IsInterface).Select(type =>
-                    {
-                        var interfaces = type.GetInterfaces();
-                        List<Type> allInterfaces = [];
-                        var otherTypes = type.GetCustomAttribute<FeatureOtherImplementationAttribute>()?.Types ?? [];
-                        var serviceLifetime = type.GetCustomAttribute<FeatureServiceLifetimeAttribute>()?.Lifetime ?? ServiceLifetime.Scoped;
-                        var isFeature = false;
-                        foreach (var i in interfaces)
+                    foreach (var type in assembly.GetTypes()) {
+                        if(!type.IsAbstract && !type.IsInterface)
                         {
-                            if (i.IsGenericType && i.GetGenericTypeDefinition() == baseFeatureType)
+                            var interfaces = type.GetInterfaces();
+                            List<Type> allInterfaces = [];
+                            var otherTypes = type.GetCustomAttribute<FeatureOtherImplementationAttribute>()?.Types ?? [];
+                            var serviceLifetime = type.GetCustomAttribute<FeatureServiceLifetimeAttribute>()?.Lifetime ?? ServiceLifetime.Scoped;
+                            var isFeature = false;
+                            foreach (var i in interfaces)
                             {
-                                isFeature = true;
-                                allInterfaces.Add(i);
+                                if (i == typeof(IFeatureRegistrationHandler))
+                                {
+                                    typesWithHandler.Add(type);
+                                }
+                                if (i == typeof(IFeatureRootComponent))
+                                {
+                                    featureRootComponents.Add(type);
+                                }
+                                if (i.IsGenericType && i.GetGenericTypeDefinition() == baseFeatureType)
+                                {
+                                    isFeature = true;
+                                    allInterfaces.Add(i);
+                                }
+                                else if (otherTypes.Contains(i))
+                                {
+                                    allInterfaces.Add(i);
+                                }
                             }
-                            else if (otherTypes.Contains(i))
+                            if (!isFeature)
                             {
-                                allInterfaces.Add(i);
+                                allInterfaces.Clear();
                             }
-                            if(i == typeof(IFeatureRegistrationHandler))
-                            {
-                                typesWithHandler.Add(type);
-                            }
+                            featureTypes.Add((Interfaces: allInterfaces, Implementation: type, Lifetime: serviceLifetime));
                         }
-                        if (!isFeature)
-                        {
-                            allInterfaces.Clear();
-                        }
-                        return (Interfaces: allInterfaces, Implementation: type, Lifetime: serviceLifetime);
-                    })
-            );
+                    }
+                }
+            }
 
-            foreach(var type in typesWithHandler)
+            foreach (var type in typesWithHandler)
             {
                 FeatureRegistrationHandlerRunner.InvokeBefore(type, services);
+            }
+
+            foreach (var type in featureRootComponents)
+            {
+                services.AddSingleton(type);
+                services.AddSingleton(typeof(IFeatureRootComponent), type);
             }
 
             foreach (var (Interfaces, Implementation, Lifetime) in featureTypes)
