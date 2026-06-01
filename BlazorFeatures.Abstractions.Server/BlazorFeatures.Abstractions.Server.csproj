@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <PackageId>BlazorFeatures.Abstractions.Server</PackageId>
+    <Version>1.0.5</Version>
+    <Authors>Federico Mangini</Authors>
+    <Description>The base classes and interfaces for the feature system. Only for server-side project</Description>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorFeatures.Abstractions\BlazorFeatures.Abstractions.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
