@@ -55,7 +55,7 @@ namespace BlazorFeatures.Abstractions
             var dataStr = await response.Content.ReadAsStringAsync();
             try
             {
-                featureRes = JsonSerializer.Deserialize<FeatureResponse<T>>(dataStr, options)!;
+                featureRes = JsonSerializer.Deserialize<FeatureResponse<T>>(dataStr, options ?? Constants.DefaultJsonSerializerOptions)!;
             }
             catch (Exception)
             {
