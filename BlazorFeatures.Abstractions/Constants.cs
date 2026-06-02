@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace BlazorFeatures.Abstractions
 {
@@ -12,6 +14,11 @@ namespace BlazorFeatures.Abstractions
 
         public static bool IsClientEnvironment => RuntimeInformation.ProcessArchitecture == Architecture.Wasm;
         public static bool IsServerEnvironment => !IsClientEnvironment;
+
+        public static JsonSerializerOptions DefaultJsonSerializerOptions { get; internal set; } = new()
+        {
+            PropertyNameCaseInsensitive = true
+        };
 
         public static IComponentRenderMode? GetApplicationRenderMode(RenderType renderType)
         {

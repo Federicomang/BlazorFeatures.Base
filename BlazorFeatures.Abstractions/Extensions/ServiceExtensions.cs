@@ -63,9 +63,14 @@ namespace BlazorFeatures.Abstractions.Extensions
 
             var options = new FeatureApplicationOptions()
             {
-                ApplicationRenderType = builder.ApplicationRenderType,
-                JsonSerializerOptions = builder.JsonSerializerOptions ?? JsonSerializerOptions.Default
+                ApplicationRenderType = builder.ApplicationRenderType
             };
+
+            if(builder.JsonSerializerOptions != null)
+            {
+                Constants.DefaultJsonSerializerOptions = builder.JsonSerializerOptions;
+                options.JsonSerializerOptions = builder.JsonSerializerOptions;
+            }
 
             services.AddScoped<IFeatureService, FeatureService>();
             services.AddSingleton(new FeatureRootComponentsManager(featureRootComponents));
