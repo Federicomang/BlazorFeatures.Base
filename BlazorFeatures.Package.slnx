@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="BlazorFeatures.Base/BlazorFeatures.Base.csproj" />
+  <Project Path="BlazorFeatures.Base.Abstractions/BlazorFeatures.Abstractions.csproj" Id="d467276c-f734-487f-841a-d9b295a1e7a1" />
+  <Project Path="BlazorFeatures.Base.Server/BlazorFeatures.Base.Server.csproj" Id="0f78c164-0ad7-4498-897b-829ea027cc17" />
+</Solution>
