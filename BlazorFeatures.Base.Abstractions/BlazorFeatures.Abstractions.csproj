@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>BlazorFeatures.Abstractions</PackageId>
-    <Version>1.1.3</Version>
+    <Version>1.1.5</Version>
     <Authors>Federico Mangini</Authors>
     <Description>The base classes and interfaces of the feature system</Description>
     <TargetFramework>netstandard2.0</TargetFramework>

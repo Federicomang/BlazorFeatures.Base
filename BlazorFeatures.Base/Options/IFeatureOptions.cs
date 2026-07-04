@@ -3,7 +3,7 @@ using BlazorFeatures.Abstractions.Options;
 
 namespace BlazorFeatures.Base.Options
 {
-    public interface IFeatureOptions<T> : IFeatureOptions where T : class, IBaseFeature, new()
+    public interface IFeatureOptions<T> : IFeatureOptions where T : class, IBaseFeature
     {
         Type IFeatureOptions.FeatureType => typeof(T);
     }
