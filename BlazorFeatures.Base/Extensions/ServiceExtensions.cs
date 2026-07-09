@@ -84,14 +84,17 @@ namespace BlazorFeatures.Base.Extensions
                                 {
                                     isFeature = true;
                                     allInterfaces.Add(i);
-                                    allFeatures.Add(i, renderType.Value);
                                 }
                                 else if (otherTypes.Contains(i))
                                 {
                                     allInterfaces.Add(i);
                                 }
                             }
-                            if (!isFeature)
+                            if (isFeature)
+                            {
+                                allFeatures[type] = renderType.Value;
+                            }
+                            else
                             {
                                 allInterfaces.Clear();
                             }
@@ -111,7 +114,8 @@ namespace BlazorFeatures.Base.Extensions
                             {
                                 if (i.IsGenericType && i.GetGenericTypeDefinition() == baseFeatureType)
                                 {
-                                    allFeatures.Add(i, renderType.Value);
+                                    allFeatures[type] = renderType.Value;
+                                    break;
                                 }
                             }
                         }
