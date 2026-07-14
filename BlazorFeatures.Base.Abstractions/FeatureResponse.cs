@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace BlazorFeatures.Abstractions
@@ -54,10 +55,14 @@ namespace BlazorFeatures.Abstractions
             return FeatureResponse<K>.Create(Success, builder(this), Messages, ValidationErrors);
         }
 
-        public static async Task<FeatureResponse<T>> FromHttpResponse(HttpResponseMessage response, JsonSerializerOptions? options)
+        public static async Task<FeatureResponse<T>> FromHttpResponse(HttpResponseMessage response, JsonSerializerOptions? options, CancellationToken cancellationToken = default)
         {
             FeatureResponse<T> featureRes;
+#if NET10_0_OR_GREATER
+            var dataStr = await response.Content.ReadAsStringAsync(cancellationToken);
+#else
             var dataStr = await response.Content.ReadAsStringAsync();
+#endif
             try
             {
                 featureRes = JsonSerializer.Deserialize<FeatureResponse<T>>(dataStr, options)!;
@@ -70,10 +75,14 @@ namespace BlazorFeatures.Abstractions
             return featureRes;
         }
 
-        public static async Task<FeatureResponse<T>> FromHttpResponse(HttpResponseMessage response, Func<string?, Task<FeatureResponse<T>>> customDeserialize)
+        public static async Task<FeatureResponse<T>> FromHttpResponse(HttpResponseMessage response, Func<string?, Task<FeatureResponse<T>>> customDeserialize, CancellationToken cancellationToken = default)
         {
             FeatureResponse<T> featureRes;
+#if NET10_0_OR_GREATER
+            var dataStr = await response.Content.ReadAsStringAsync(cancellationToken);
+#else
             var dataStr = await response.Content.ReadAsStringAsync();
+#endif
             try
             {
                 featureRes = await customDeserialize(dataStr);
