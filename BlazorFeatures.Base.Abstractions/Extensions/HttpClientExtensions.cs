@@ -62,10 +62,10 @@ namespace BlazorFeatures.Abstractions.Extensions
             {
                 if (item.EventType == options.ResponseEventKeyword)
                 {
-                    featureRes = await options.GenerateFeatureResponse(response, cancellationToken);
+                    featureRes = await options.GenerateFeatureResponse(item.Data);
                 }
 
-                await request.OnEventSse(item);
+                await request.OnEventSse(item, options.JsonSerializerOptions);
             }
 #else
             using var stream = await response.Content.ReadAsStreamAsync();
@@ -95,7 +95,7 @@ namespace BlazorFeatures.Abstractions.Extensions
                         }
 
                         var sseEvent = new SseEvent(eventId!, eventType!, data, retryMilliseconds);
-                        await request.OnEventSse(sseEvent);
+                        await request.OnEventSse(sseEvent, options.JsonSerializerOptions);
                     }
 
                     dataLines.Clear();
