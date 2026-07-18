@@ -112,10 +112,18 @@ namespace BlazorFeatures.Base.Extensions
                             var interfaces = type.GetInterfaces();
                             foreach (var i in interfaces)
                             {
+                                if (i == typeof(IFeaturePolicy))
+                                {
+                                    var method = type.GetMethod(nameof(IFeaturePolicy.BuildFeaturePolicy), BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly);
+                                    if (method != null)
+                                    {
+                                        var policyName = FeaturePolicyTools.BuildPolicyName(type);
+                                        policies.Add((policyName, method));
+                                    }
+                                }
                                 if (i.IsGenericType && i.GetGenericTypeDefinition() == baseFeatureType)
                                 {
                                     allFeatures[type] = renderType.Value;
-                                    break;
                                 }
                             }
                         }
