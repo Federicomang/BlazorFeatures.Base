@@ -53,7 +53,12 @@ namespace BlazorFeatures.Base
         private async Task<FeatureResponse<Response>> Run<Response>(Type requestType, IBaseFeatureRequest<Response> request, IFeatureContext? featureContext, CancellationToken cancellationToken = default) where Response : class
         {
             var handlerType = ReflectionTools.GetGenericType(typeof(IBaseFeature<,>), requestType, typeof(Response));
-            var handler = (IBaseFeature)serviceProvider.GetRequiredService(handlerType);
+            if (serviceProvider.GetService(handlerType) is not IBaseFeature handler)
+            {
+                var featureTypeResolver = serviceProvider.GetRequiredService<FeatureTypeResolver>();
+                var featureType = featureTypeResolver.Resolve(requestType, typeof(Response));
+                handler = (IBaseFeature)serviceProvider.GetRequiredService(featureType);
+            }
 
             if (Constants.IsClientEnvironment)
             {
@@ -64,7 +69,7 @@ namespace BlazorFeatures.Base
             {
                 var serverHandler = new ServerHandler<Response>(handler, request, cancellationToken);
                 var serverService = serviceProvider.GetService<IServerFeatureService>();
-                if(serverService == null)
+                if (serverService == null)
                 {
                     return await serverHandler.Handle(featureContext ?? new BaseFeatureContext());
                 }

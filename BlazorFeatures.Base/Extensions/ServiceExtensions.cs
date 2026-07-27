@@ -21,7 +21,7 @@ namespace BlazorFeatures.Base.Extensions
             RenderType currentRenderType;
             string featureHandlerId;
             Type? featureHandlerType = null;
-            if(Constants.IsClientEnvironment)
+            if (Constants.IsClientEnvironment)
             {
                 currentRenderType = RenderType.Client;
                 featureHandlerId = FeatureSystemHandlerConstants.Client;
@@ -39,14 +39,16 @@ namespace BlazorFeatures.Base.Extensions
             var assemblies = new Dictionary<Assembly, RenderType>();
             var policies = new List<(string Name, MethodInfo Builder)>();
             var featureTypes = new List<(List<Type> Interfaces, Type Implementation, ServiceLifetime Lifetime)>();
+            var genericFeatureTypes = new List<Type>();
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 var renderType = assembly.GetCustomAttribute<FeatureAssemblyAttribute>()?.RenderType;
                 if (renderType == RenderType.Both || renderType == currentRenderType)
                 {
                     assemblies.Add(assembly, renderType.Value);
-                    foreach (var type in assembly.GetTypes()) {
-                        if(!type.IsAbstract && !type.IsInterface)
+                    foreach (var type in assembly.GetTypes())
+                    {
+                        if (!type.IsAbstract && !type.IsInterface)
                         {
                             var interfaces = type.GetInterfaces();
                             List<Type> allInterfaces = [];
@@ -93,6 +95,10 @@ namespace BlazorFeatures.Base.Extensions
                             if (isFeature)
                             {
                                 allFeatures[type] = renderType.Value;
+                                if (type.IsGenericTypeDefinition)
+                                {
+                                    genericFeatureTypes.Add(type);
+                                }
                             }
                             else
                             {
@@ -141,6 +147,7 @@ namespace BlazorFeatures.Base.Extensions
 
             services.AddScoped<IFeatureService, FeatureService>();
             services.AddSingleton(containerService);
+            services.AddSingleton(new FeatureTypeResolver(genericFeatureTypes));
 
             var builder = new FeatureConfigBuilder();
             configure?.Invoke(builder);
@@ -165,10 +172,13 @@ namespace BlazorFeatures.Base.Extensions
                 if (Interfaces.Count > 0)
                 {
                     services.Add(ServiceDescriptor.Describe(Implementation, Implementation, Lifetime));
-                    services.Add(ServiceDescriptor.Describe(typeof(IBaseFeature), sp => sp.GetRequiredService(Implementation), Lifetime));
-                    foreach (var i in Interfaces)
+                    if (!Implementation.IsGenericTypeDefinition)
                     {
-                        services.Add(ServiceDescriptor.Describe(i, sp => sp.GetRequiredService(Implementation), Lifetime));
+                        services.Add(ServiceDescriptor.Describe(typeof(IBaseFeature), sp => sp.GetRequiredService(Implementation), Lifetime));
+                        foreach (var i in Interfaces)
+                        {
+                            services.Add(ServiceDescriptor.Describe(i, sp => sp.GetRequiredService(Implementation), Lifetime));
+                        }
                     }
                 }
             }
