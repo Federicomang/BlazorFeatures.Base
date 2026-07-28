@@ -9,12 +9,14 @@ namespace BlazorFeatures.Base
         public static abstract void BuildFeaturePolicy(AuthorizationPolicyBuilder builder);
     }
 
-    internal static class FeaturePolicyTools
+    public static class FeaturePolicyTools
     {
-        internal static string BuildPolicyName(Type type)
+        public static string BuildPolicyName(Type type)
         {
             var customName = type.GetCustomAttribute<FeaturePolicyNameAttribute>()?.Name;
             return customName ?? $"FeaturePolicy#{type.Assembly.GetName().Name}#{type.FullName}";
         }
+
+        public static string BuildPolicyName<T>() where T : class, IFeaturePolicy => BuildPolicyName(typeof(T));
     }
 }

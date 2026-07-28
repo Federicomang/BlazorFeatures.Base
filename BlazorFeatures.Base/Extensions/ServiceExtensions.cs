@@ -40,7 +40,15 @@ namespace BlazorFeatures.Base.Extensions
             var policies = new List<(string Name, MethodInfo Builder)>();
             var featureTypes = new List<(List<Type> Interfaces, Type Implementation, ServiceLifetime Lifetime)>();
             var genericFeatureTypes = new List<Type>();
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+
+            var builder = new FeatureConfigBuilder()
+            {
+                Assemblies = [.. AppDomain.CurrentDomain.GetAssemblies()]
+            };
+            configure?.Invoke(builder);
+            var assembliesToScan = builder.Assemblies.Distinct().ToArray();
+
+            foreach (var assembly in assembliesToScan)
             {
                 var renderType = assembly.GetCustomAttribute<FeatureAssemblyAttribute>()?.RenderType;
                 if (renderType == RenderType.Both || renderType == currentRenderType)
@@ -148,9 +156,6 @@ namespace BlazorFeatures.Base.Extensions
             services.AddScoped<IFeatureService, FeatureService>();
             services.AddSingleton(containerService);
             services.AddSingleton(new FeatureTypeResolver(genericFeatureTypes));
-
-            var builder = new FeatureConfigBuilder();
-            configure?.Invoke(builder);
 
             foreach (var featureOption in featureOptions)
             {
