@@ -2,6 +2,7 @@
 using System.Linq.Expressions;
 using System.Linq.Dynamic.Core;
 using BlazorFeatures.Abstractions;
+using BlazorFeatures.Base.Server.Infrastructure;
 
 namespace BlazorFeatures.Base.Server.Extensions
 {
@@ -33,39 +34,120 @@ namespace BlazorFeatures.Base.Server.Extensions
         }
 
         public static IQueryable<K> Filter<T, K>(this IQueryable<T> source, Expression<Func<T, bool>> filter, string? orderStr, Expression<Func<T, K>> selectExpression) where T : class
+            => Filter(source, filter, orderStr, selectExpression, new());
+
+        public static IQueryable<K> Filter<T, K>(this IQueryable<T> source, Expression<Func<T, bool>> filter, string? orderStr, Expression<Func<T, K>> selectExpression, QueryableFilterOptions<T, K> options) where T : class
         {
             ArgumentNullException.ThrowIfNull(source);
             var query = source.Where(filter);
             List<string> entityOrdering = [], modelOrdering = [];
-            if(!string.IsNullOrEmpty(orderStr))
+            if (!string.IsNullOrEmpty(orderStr))
             {
-                foreach (var order in orderStr.Split("|"))
+                foreach (var order in orderStr.Split(options.OrderSeparator))
                 {
-                    if (order.StartsWith('$')) modelOrdering.Add(order[1..]);
+                    if (order.StartsWith(options.ModelOrderingPrefix)) modelOrdering.Add(order[1..]);
                     else entityOrdering.Add(order);
                 }
             }
+            var alreadyOrdered = false;
             for (var i = 0; i < entityOrdering.Count; i++)
             {
-                if(i == 0)
+                var item = entityOrdering[i].Trim();
+                var idx = item.IndexOf(' ');
+                var descending = false;
+                bool existsCustomOrdering;
+                IOrderExpression<T>? customOrdering;
+                if (idx < 0)
                 {
-                    query = query.OrderBy(entityOrdering[i]);
+                    existsCustomOrdering = options.CustomEntityOrdering.TryGetValue(item, out customOrdering);
                 }
                 else
                 {
-                    query = ((IOrderedQueryable<T>)query).ThenBy(entityOrdering[i]);
+                    var name = item[..idx];
+                    var sortDir = item[(idx + 1)..];
+                    existsCustomOrdering = options.CustomEntityOrdering.TryGetValue(name, out customOrdering);
+                    descending = "desc".Equals(sortDir, StringComparison.InvariantCultureIgnoreCase);
+                }
+                if (alreadyOrdered)
+                {
+                    if (existsCustomOrdering)
+                    {
+                        if(customOrdering != null)
+                        {
+                            query = customOrdering.ApplyThen((IOrderedQueryable<T>)query, descending);
+                        }
+                    }
+                    else
+                    {
+                        query = ((IOrderedQueryable<T>)query).ThenBy(item);
+                    }
+                }
+                else
+                {
+                    if (existsCustomOrdering)
+                    {
+                        if(customOrdering != null)
+                        {
+                            query = customOrdering.Apply(query, descending);
+                            alreadyOrdered = true;
+                        }
+                    }
+                    else
+                    {
+                        query = query.OrderBy(item);
+                        alreadyOrdered = true;
+                    }
                 }
             }
             var resultQuery = query.Select(selectExpression);
+            alreadyOrdered = false;
             for (var i = 0; i < modelOrdering.Count; i++)
             {
-                if (i == 0)
+                var item = modelOrdering[i].Trim();
+                var idx = item.IndexOf(' ');
+                var descending = false;
+                bool existsCustomOrdering;
+                IOrderExpression<K>? customOrdering;
+                if (idx < 0)
                 {
-                    resultQuery = resultQuery.OrderBy(entityOrdering[i]);
+                    existsCustomOrdering = options.CustomModelOrdering.TryGetValue(item, out customOrdering);
                 }
                 else
                 {
-                    resultQuery = ((IOrderedQueryable<K>)resultQuery).ThenBy(entityOrdering[i]);
+                    var name = item[..idx];
+                    var sortDir = item[(idx + 1)..];
+                    existsCustomOrdering = options.CustomModelOrdering.TryGetValue(name, out customOrdering);
+                    descending = "desc".Equals(sortDir, StringComparison.InvariantCultureIgnoreCase);
+                }
+                if (alreadyOrdered)
+                {
+                    if (existsCustomOrdering)
+                    {
+                        if(customOrdering != null)
+                        {
+                            resultQuery = customOrdering.ApplyThen((IOrderedQueryable<K>)resultQuery, descending);
+                        }
+                    }
+                    else
+                    {
+                        resultQuery = ((IOrderedQueryable<K>)resultQuery).ThenBy(item);
+                    }
+                }
+                else
+                {
+                    if (existsCustomOrdering)
+                    {
+                        if(customOrdering != null)
+                        {
+                            resultQuery = customOrdering.Apply(resultQuery, descending);
+                            alreadyOrdered = true;
+                        }
+                    }
+                    else
+                    {
+                        resultQuery = resultQuery.OrderBy(item);
+                        alreadyOrdered = true;
+                    }
                 }
             }
             return resultQuery;
