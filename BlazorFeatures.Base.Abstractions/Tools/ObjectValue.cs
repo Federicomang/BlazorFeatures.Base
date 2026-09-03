@@ -9,16 +9,25 @@ namespace BlazorFeatures.Abstractions.Tools
     /// <summary>
     /// Classe interna che gestisce un valore condiviso di tipo generico
     /// </summary>
-    internal class SharedValue(object value)
+    internal class SharedValue<T>(T value)
     {
         // Valore interno memorizzato come object
         private object Value { get; set; } = value;
 
+        internal Action<T, T> ValueChangedFunc { get; set; }
+
         // Imposta il valore interno
-        public void Set(object value) => Value = value;
+        public void Set(T value)
+        {
+            var precValue = (T)Value;
+            Value = value;
+            ValueChangedFunc?.Invoke(precValue, value);
+        }
 
         // Ottiene il valore convertito nel tipo specificato
-        public T Get<T>() => (T)Value;
+        public T Get() => (T)Value;
+
+        internal SharedValue<K> As<K>() => new((K)Value);
     }
 
     /// <summary>
@@ -31,22 +40,27 @@ namespace BlazorFeatures.Abstractions.Tools
         private readonly object ValueLock;
 
         // Riferimento al valore condiviso
-        private SharedValue Value { get; set; }
+        private SharedValue<T> Value { get; set; }
+
+        public event Action<T, T> ValueChanged;
 
         // Costruttore privato per l'inizializzazione interna
-        private ObjectValue(SharedValue value, object valueLock)
+        private ObjectValue(SharedValue<T> value, object valueLock)
         {
             Value = value;
+            Value.ValueChangedFunc = OnValueChanged;
             ValueLock = valueLock;
         }
 
         // Costruttore pubblico che accetta il valore iniziale
         public ObjectValue(T value) : this(new(value), new()) { }
 
+        private void OnValueChanged(T oldValue, T newValue) => ValueChanged?.Invoke(oldValue, newValue);
+
         // Converte il valore in un altro tipo mantenendo lo stesso lock
         public ObjectValue<K> As<K>()
         {
-            return new ObjectValue<K>(Value, ValueLock);
+            return new ObjectValue<K>(Value.As<K>(), ValueLock);
         }
 
         // Ottiene il valore in modo thread-safe
@@ -54,7 +68,7 @@ namespace BlazorFeatures.Abstractions.Tools
         {
             lock (ValueLock)
             {
-                return Value.Get<T>();
+                return Value.Get();
             }
         }
 
@@ -71,7 +85,7 @@ namespace BlazorFeatures.Abstractions.Tools
         {
             lock (ValueLock)
             {
-                var value = func(Value.Get<T>());
+                var value = func(Value.Get());
                 Value.Set(value);
                 return value;
             }
@@ -81,7 +95,7 @@ namespace BlazorFeatures.Abstractions.Tools
         {
             lock (ValueLock)
             {
-                func(Value.Get<T>());
+                func(Value.Get());
             }
         }
     }
@@ -96,22 +110,27 @@ namespace BlazorFeatures.Abstractions.Tools
         private readonly SemaphoreSlim ValueLock;
 
         // Riferimento al valore condiviso
-        private SharedValue Value { get; set; }
+        private SharedValue<T> Value { get; set; }
+
+        public event Action<T, T> ValueChanged;
 
         // Costruttore privato per l'inizializzazione interna
-        private AsyncObjectValue(SharedValue value, SemaphoreSlim valueLock)
+        private AsyncObjectValue(SharedValue<T> value, SemaphoreSlim valueLock)
         {
             Value = value;
+            Value.ValueChangedFunc = OnValueChanged;
             ValueLock = valueLock;
         }
 
         // Costruttore pubblico che accetta il valore iniziale
         public AsyncObjectValue(T value) : this(new(value), new(1, 1)) { }
 
+        private void OnValueChanged(T oldValue, T newValue) => ValueChanged?.Invoke(oldValue, newValue);
+
         // Converte il valore in un altro tipo mantenendo lo stesso lock
         public AsyncObjectValue<K> As<K>()
         {
-            return new AsyncObjectValue<K>(Value, ValueLock);
+            return new AsyncObjectValue<K>(Value.As<K>(), ValueLock);
         }
 
         // Esegue una funzione di trasformazione sul valore in modo thread-safe
@@ -120,14 +139,14 @@ namespace BlazorFeatures.Abstractions.Tools
             await ValueLock.WaitAsync();
             try
             {
-                Value.Set(func(Value.Get<T>()));
+                Value.Set(func(Value.Get()));
             }
             catch (Exception)
             {
                 ValueLock.Release();
                 throw;
             }
-            var value = Value.Get<T>();
+            var value = Value.Get();
             ValueLock.Release();
             return value;
         }
@@ -138,14 +157,14 @@ namespace BlazorFeatures.Abstractions.Tools
             await ValueLock.WaitAsync();
             try
             {
-                Value.Set(await func(Value.Get<T>()));
+                Value.Set(await func(Value.Get()));
             }
             catch (Exception)
             {
                 ValueLock.Release();
                 throw;
             }
-            var value = Value.Get<T>();
+            var value = Value.Get();
             ValueLock.Release();
             return value;
         }
@@ -156,7 +175,7 @@ namespace BlazorFeatures.Abstractions.Tools
             await ValueLock.WaitAsync();
             try
             {
-                func(Value.Get<T>());
+                func(Value.Get());
                 ValueLock.Release();
             }
             catch (Exception)
@@ -172,7 +191,7 @@ namespace BlazorFeatures.Abstractions.Tools
             await ValueLock.WaitAsync();
             try
             {
-                await func(Value.Get<T>());
+                await func(Value.Get());
                 ValueLock.Release();
             }
             catch (Exception)
@@ -188,7 +207,7 @@ namespace BlazorFeatures.Abstractions.Tools
             await ValueLock.WaitAsync();
             try
             {
-                var result = func(Value.Get<T>());
+                var result = func(Value.Get());
                 ValueLock.Release();
                 return result;
             }
@@ -205,7 +224,7 @@ namespace BlazorFeatures.Abstractions.Tools
             await ValueLock.WaitAsync();
             try
             {
-                var result = await func(Value.Get<T>());
+                var result = await func(Value.Get());
                 ValueLock.Release();
                 return result;
             }
@@ -228,7 +247,7 @@ namespace BlazorFeatures.Abstractions.Tools
         public async Task<T> GetValue()
         {
             await ValueLock.WaitAsync();
-            var value = Value.Get<T>();
+            var value = Value.Get();
             ValueLock.Release();
             return value;
         }
