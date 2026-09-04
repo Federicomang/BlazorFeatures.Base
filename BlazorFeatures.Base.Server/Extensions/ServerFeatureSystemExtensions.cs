@@ -7,8 +7,10 @@ namespace BlazorFeatures.Base.Server.Extensions
     {
         public static void AddToDbContext(this FeatureSystemContainerService containerService, ModelBuilder modelBuilder)
         {
-            var dbContextBuilders = containerService.ServerAssemblies.SelectMany(x => x.GetTypes()
-                .Where(type => !type.IsAbstract && !type.IsInterface && typeof(IDbContextExtension).IsAssignableFrom(type)));
+            var dbContextBuilders = containerService.ServerTypes
+                .Where(type => !type.IsAbstract
+                    && !type.IsInterface
+                    && typeof(IDbContextExtension).IsAssignableFrom(type));
 
             foreach (var builder in dbContextBuilders)
             {

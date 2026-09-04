@@ -10,8 +10,10 @@ namespace BlazorFeatures.Base.Server.Extensions
         {
             var featureContainerService = applicationBuilder.ApplicationServices.GetRequiredService<FeatureSystemContainerService>();
 
-            var endpointRegisterTypes = featureContainerService.ServerAssemblies.SelectMany(x => x.GetTypes()
-                .Where(type => !type.IsAbstract && !type.IsInterface && typeof(IBaseFeatureEndpoint).IsAssignableFrom(type)));
+            var endpointRegisterTypes = featureContainerService.ServerTypes
+                .Where(type => !type.IsAbstract
+                    && !type.IsInterface
+                    && typeof(IBaseFeatureEndpoint).IsAssignableFrom(type));
 
             foreach (var endpointType in endpointRegisterTypes)
             {
