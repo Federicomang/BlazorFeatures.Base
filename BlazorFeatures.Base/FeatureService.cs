@@ -1,4 +1,5 @@
 ﻿using BlazorFeatures.Abstractions;
+using BlazorFeatures.Abstractions.Enums;
 using BlazorFeatures.Abstractions.Tools;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -23,7 +24,6 @@ namespace BlazorFeatures.Base
 
             public async Task<FeatureResponse<T>> Handle(IFeatureContext featureContext)
             {
-                featureContext.FeatureChain.Add(Request);
                 var res = await Feature.HandleClient(Request, featureContext, CancellationToken);
                 return res.ConvertTo<T>();
             }
@@ -44,7 +44,6 @@ namespace BlazorFeatures.Base
 
             public async Task<FeatureResponse<T>> Handle(IFeatureContext featureContext)
             {
-                featureContext.FeatureChain.Add(Request);
                 var res = await Feature.HandleServer(Request, featureContext, CancellationToken);
                 return res.ConvertTo<T>();
             }
@@ -60,10 +59,15 @@ namespace BlazorFeatures.Base
                 handler = (IBaseFeature)serviceProvider.GetRequiredService(featureType);
             }
 
+            featureContext ??= new BaseFeatureContext(Constants.IsClientEnvironment
+                ? FeatureInvocationSource.Client
+                : FeatureInvocationSource.Server);
+            featureContext.FeatureChain.Add(request);
+
             if (Constants.IsClientEnvironment)
             {
                 var clientHandler = new ClientHandler<Response>(handler, request, cancellationToken);
-                return await clientHandler.Handle(featureContext ?? new BaseFeatureContext());
+                return await clientHandler.Handle(featureContext);
             }
             else
             {
@@ -71,11 +75,11 @@ namespace BlazorFeatures.Base
                 var serverService = serviceProvider.GetService<IServerFeatureService>();
                 if (serverService == null)
                 {
-                    return await serverHandler.Handle(featureContext ?? new BaseFeatureContext());
+                    return await serverHandler.Handle(featureContext);
                 }
                 else
                 {
-                    return await serverService.HandleServer(serverHandler, requestType, request, featureContext, cancellationToken);
+                    return await serverService.HandleServer(handler, serverHandler, requestType, request, featureContext, cancellationToken);
                 }
             }
         }

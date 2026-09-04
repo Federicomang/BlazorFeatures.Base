@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,6 +25,9 @@ namespace BlazorFeatures.Abstractions
         [JsonInclude]
         public IDictionary<string, string[]>? ValidationErrors { get; set; }
 
+        [JsonInclude]
+        public HttpStatusCode? StatusCode { get; private set; }
+
         [JsonIgnore]
         public HttpResponseMessage? HttpResponseMessage { get; private set; }
 
@@ -36,23 +40,29 @@ namespace BlazorFeatures.Abstractions
 
         public FeatureResponse<object> AsGeneric()
         {
-            return FeatureResponse<object>.Create(Success, Data, Messages, ValidationErrors);
+            return FeatureResponse<object>.Create(Success, Data, Messages, ValidationErrors, StatusCode);
         }
 
         public FeatureResponse<K> ConvertTo<K>() where K : class, T
         {
-            return FeatureResponse<K>.Create(Success, (K?)Data, Messages, ValidationErrors);
+            return FeatureResponse<K>.Create(Success, (K?)Data, Messages, ValidationErrors, StatusCode);
         }
 
         public FeatureResponse<K> ConvertTo<K>(K onSuccessData, K? onFailureData = null) where K : class
         {
             var data = Success ? onSuccessData : onFailureData;
-            return FeatureResponse<K>.Create(Success, data, Messages, ValidationErrors);
+            return FeatureResponse<K>.Create(Success, data, Messages, ValidationErrors, StatusCode);
         }
 
         public FeatureResponse<K> ConvertTo<K>(Func<FeatureResponse<T>, K?> builder) where K : class
         {
-            return FeatureResponse<K>.Create(Success, builder(this), Messages, ValidationErrors);
+            return FeatureResponse<K>.Create(Success, builder(this), Messages, ValidationErrors, StatusCode);
+        }
+
+        public FeatureResponse<T> WithStatusCode(HttpStatusCode statusCode)
+        {
+            StatusCode = statusCode;
+            return this;
         }
 
         public static async Task<FeatureResponse<T>> FromHttpResponse(HttpResponseMessage response, JsonSerializerOptions? options, CancellationToken cancellationToken = default)
@@ -72,6 +82,7 @@ namespace BlazorFeatures.Abstractions
                 featureRes = Create();
             }
             featureRes.HttpResponseMessage = response;
+            featureRes.StatusCode = response.StatusCode;
             return featureRes;
         }
 
@@ -92,23 +103,25 @@ namespace BlazorFeatures.Abstractions
                 featureRes = Create();
             }
             featureRes.HttpResponseMessage = response;
+            featureRes.StatusCode = response.StatusCode;
             return featureRes;
         }
 
-        public static FeatureResponse<T> Create(bool success = false, T? data = null, IEnumerable<string>? messages = null, IDictionary<string, string[]>? validationErrors = null)
+        public static FeatureResponse<T> Create(bool success = false, T? data = null, IEnumerable<string>? messages = null, IDictionary<string, string[]>? validationErrors = null, HttpStatusCode? statusCode = null)
         {
             return new FeatureResponse<T>()
             {
                 Success = success,
                 Data = data,
                 Messages = messages?.ToList() ?? [],
-                ValidationErrors = validationErrors
+                ValidationErrors = validationErrors,
+                StatusCode = statusCode
             };
         }
 
-        public static FeatureResponse<T> AsSuccess(T? data) => Create(true, data);
+        public static FeatureResponse<T> AsSuccess(T? data, HttpStatusCode statusCode = HttpStatusCode.OK) => Create(true, data, statusCode: statusCode);
 
-        public static FeatureResponse<T> AsFailure(T? data = null, IEnumerable<string>? messages = null, IDictionary<string, string[]>? validationErrors = null) => Create(false, data, messages, validationErrors);
+        public static FeatureResponse<T> AsFailure(T? data = null, IEnumerable<string>? messages = null, IDictionary<string, string[]>? validationErrors = null, HttpStatusCode statusCode = HttpStatusCode.InternalServerError) => Create(false, data, messages, validationErrors, statusCode);
                 
     }
 }

@@ -1,32 +1,39 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using BlazorFeatures.Abstractions;
+using Microsoft.AspNetCore.Http;
+using System.Net;
 
 namespace BlazorFeatures.Base.Server.Extensions
 {
     public static class HttpContextExtensions
     {
-        public static void SetFeatureApiResponse(this HttpContext context, IResult resultResponse)
+        public static async Task<FeatureResponse<Response>> RunFeature<Response>(this HttpContext context, IFeatureService featureService, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
         {
-            if (!context.IsSocketConnection())
+            if (cancellationToken == default)
             {
-                context.Items["ApiResult"] = resultResponse;
+                cancellationToken = context.RequestAborted;
             }
+
+            var featureContext = new HttpFeatureContext(context);
+            var response = await featureService.Run(request, featureContext, cancellationToken);
+            await featureContext.ApplyApiFeatureResponse(request, response);
+            return response;
         }
 
-        public static async Task ApplyApiFeatureResponse(this HttpContext context)
+        public static async Task ApplyApiFeatureResponse<Response>(this IHttpFeatureContext featureContext, IBaseFeatureRequest<Response> request, FeatureResponse<Response> response) where Response : class
         {
-            if (context.Items.TryGetValue("ApiResult", out var apiResult))
+            IResult result;
+            if (featureContext.TryGetHttpResult(request, out var customResult))
             {
-                await ((IResult)apiResult!).ExecuteAsync(context);
+                result = customResult!;
             }
-        }
+            else
+            {
+                var statusCode = response.StatusCode
+                    ?? (response.Success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
+                result = Results.Json(response, statusCode: (int)statusCode);
+            }
 
-        public static IResult GetApiFeatureResponse(this HttpContext context)
-        {
-            if (context.Items.TryGetValue("ApiResult", out var apiResult))
-            {
-                return (IResult)apiResult!;
-            }
-            return Results.Empty;
+            await result.ExecuteAsync(featureContext.HttpContext);
         }
 
         public static bool IsBrowserRequest(this HttpContext context)
