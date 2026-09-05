@@ -1,11 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using System.ComponentModel;
 
 namespace BlazorFeatures.Base.Handler
 {
-    [Browsable(false)]
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public class FeatureHandlerParams
+    internal class FeatureHandlerParams
     {
         public required IServiceCollection Services { get; set; }
 

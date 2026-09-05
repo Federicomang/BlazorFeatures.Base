@@ -1,5 +1,7 @@
-﻿using BlazorFeatures.Base.Handler;
+﻿using BlazorFeatures.Abstractions;
+using BlazorFeatures.Base.Handler;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -10,19 +12,20 @@ namespace BlazorFeatures.Base.Server.Handler
     {
         public void HandlePolicies(List<(string Name, MethodInfo Builder)> policies)
         {
-            if (policies.Count > 0)
+            options.Services.AddAuthorization(authorizationOptions =>
             {
-                options.Services.AddAuthorization(options =>
+                foreach (var (Name, Builder) in policies)
                 {
-                    foreach (var (Name, Builder) in policies)
+                    authorizationOptions.AddPolicy(Name, builder =>
                     {
-                        options.AddPolicy(Name, builder =>
-                        {
-                            Builder.Invoke(null, [builder]);
-                        });
-                    }
-                });
-            }
+                        Builder.Invoke(null, [builder]);
+                    });
+                }
+            });
+
+            options.Services.AddHttpContextAccessor();
+            options.Services.TryAddScoped<IFeaturePrincipalProvider, DefaultFeaturePrincipalProvider>();
+            options.Services.TryAddScoped<IServerFeatureService, ServerFeatureService>();
         }
     }
 }

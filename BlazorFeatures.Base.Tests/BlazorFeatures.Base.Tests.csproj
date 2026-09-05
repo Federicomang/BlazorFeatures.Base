@@ -16,6 +16,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BlazorFeatures.Base\BlazorFeatures.Base.csproj" />
+    <ProjectReference Include="..\BlazorFeatures.Base.Server\BlazorFeatures.Base.Server.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>
