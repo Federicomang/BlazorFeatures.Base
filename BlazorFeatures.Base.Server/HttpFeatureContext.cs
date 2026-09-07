@@ -6,8 +6,7 @@ namespace BlazorFeatures.Base.Server
 {
     public sealed class HttpFeatureContext : BaseFeatureContext, IHttpFeatureContext
     {
-        private readonly Dictionary<IBaseFeatureRequest, IResult> _customResults =
-            new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<IBaseFeatureRequest, IResult> _customResults;
 
         public HttpContext HttpContext { get; }
 
@@ -15,8 +14,19 @@ namespace BlazorFeatures.Base.Server
             : base(FeatureInvocationSource.Http, operationId)
         {
             HttpContext = httpContext;
+            _customResults = new(ReferenceEqualityComparer.Instance);
             httpContext.Features.Set<IHttpFeatureContext>(this);
         }
+
+        private HttpFeatureContext(HttpFeatureContext parent)
+            : base(parent)
+        {
+            HttpContext = parent.HttpContext;
+            _customResults = parent._customResults;
+        }
+
+        public override IFeatureContext CreateInvocationScope() =>
+            new HttpFeatureContext(this);
 
         public void SetHttpResult(IBaseFeatureRequest owner, IResult result)
         {

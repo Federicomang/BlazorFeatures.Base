@@ -1,12 +1,29 @@
 ﻿using BlazorFeatures.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 
 namespace BlazorFeatures.Base.Server.Extensions
 {
     public static class HttpContextExtensions
     {
-        public static async Task<FeatureResponse<Response>> RunFeature<Response>(this HttpContext context, IFeatureService featureService, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
+        public static async Task RunFeature<Response>(this HttpContext context, IFeatureService featureService, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
+        {
+            _ = await RunFeatureAndGetResult(context, featureService, request, cancellationToken);
+        }
+
+        public static async Task RunFeature<Response>(this HttpContext context, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
+        {
+            _ = await RunFeatureAndGetResult(context, request, cancellationToken);
+        }
+
+        public static async Task<FeatureResponse<Response>> RunFeatureAndGetResult<Response>(this HttpContext context, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
+        {
+            var featureService = context.RequestServices.GetRequiredService<IFeatureService>();
+            return await RunFeatureAndGetResult(context, featureService, request, cancellationToken);
+        }
+
+        public static async Task<FeatureResponse<Response>> RunFeatureAndGetResult<Response>(this HttpContext context, IFeatureService featureService, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
         {
             if (cancellationToken == default)
             {

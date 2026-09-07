@@ -63,6 +63,7 @@ namespace BlazorFeatures.Base
             featureContext ??= new BaseFeatureContext(Constants.IsClientEnvironment
                 ? FeatureInvocationSource.Client
                 : FeatureInvocationSource.Server);
+            featureContext = featureContext.CreateInvocationScope();
 
             var options = serviceProvider.GetService<IOptions<FeatureTelemetryOptions>>()?.Value
                 ?? new FeatureTelemetryOptions();
