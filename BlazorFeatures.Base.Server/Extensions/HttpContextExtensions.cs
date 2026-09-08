@@ -1,7 +1,9 @@
 ﻿using BlazorFeatures.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using System.Net;
+using System.Text.Json;
 
 namespace BlazorFeatures.Base.Server.Extensions
 {
@@ -32,11 +34,12 @@ namespace BlazorFeatures.Base.Server.Extensions
 
             var featureContext = new HttpFeatureContext(context);
             var response = await featureService.Run(request, featureContext, cancellationToken);
-            await featureContext.ApplyApiFeatureResponse(request, response);
+            var jsonOptions = context.RequestServices.GetService<IOptions<JsonSerializerOptions>>()?.Value;
+            await featureContext.ApplyApiFeatureResponse(request, response, jsonOptions);
             return response;
         }
 
-        public static async Task ApplyApiFeatureResponse<Response>(this IHttpFeatureContext featureContext, IBaseFeatureRequest<Response> request, FeatureResponse<Response> response) where Response : class
+        public static async Task ApplyApiFeatureResponse<Response>(this IHttpFeatureContext featureContext, IBaseFeatureRequest<Response> request, FeatureResponse<Response> response, JsonSerializerOptions? jsonOptions) where Response : class
         {
             IResult result;
             if (featureContext.TryGetHttpResult(request, out var customResult))
@@ -47,7 +50,7 @@ namespace BlazorFeatures.Base.Server.Extensions
             {
                 var statusCode = response.StatusCode
                     ?? (response.Success ? HttpStatusCode.OK : HttpStatusCode.InternalServerError);
-                result = Results.Json(response, statusCode: (int)statusCode);
+                result = Results.Json(response, options: jsonOptions, statusCode: (int)statusCode);
             }
 
             await result.ExecuteAsync(featureContext.HttpContext);
