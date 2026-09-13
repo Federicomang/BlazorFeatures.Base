@@ -1,11 +1,12 @@
 ﻿using BlazorFeatures.Abstractions.Interfaces;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Http.Metadata;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using System.ComponentModel;
-using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,9 +25,12 @@ namespace BlazorFeatures.Base.Server.Tools
             Value = value;
         }
 
-        public static void PopulateMetadata(ParameterInfo parameter, EndpointBuilder builder)
+        public static void PopulateMetadata(
+            ParameterInfo parameter,
+            EndpointBuilder builder)
         {
-            builder.Metadata.Add(new QueryBoundMetadata(typeof(T)));
+            builder.Metadata.Add(
+                new QueryBoundMetadata(typeof(T)));
         }
 
         public static ValueTask<QueryBound<T>?> BindAsync(
@@ -35,28 +39,59 @@ namespace BlazorFeatures.Base.Server.Tools
         {
             var query = context.Request.Query;
             var model = new T();
-            List<string> names = [];
+            var typeHints = UnmanagedDataBindingTools.GetTypeHints(query);
 
-            foreach (var prop in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            var names = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            var jsonOptions = context.RequestServices
+                .GetService<IOptions<JsonOptions>>()?
+                .Value
+                .SerializerOptions;
+
+            foreach (var prop in typeof(T).GetProperties(
+                BindingFlags.Public | BindingFlags.Instance))
             {
                 if (!prop.CanWrite)
                     continue;
 
+                if (IsExtensionDataProperty(model, prop))
+                    continue;
+
                 var name = GetQueryParameterName(prop);
+
                 names.Add(name);
 
-                BindProperty(model, prop, name, query);
+                BindProperty(
+                    model,
+                    prop,
+                    name,
+                    query,
+                    jsonOptions);
             }
+
+            UnmanagedDataBindingTools.ValidateHints(
+                typeHints,
+                names,
+                query,
+                model is IWithUnmanagedData);
 
             if (model is IWithUnmanagedData unmanaged)
             {
-                foreach (var field in context.Request.Query)
+                foreach (var field in query)
                 {
-                    if (!names.Contains(field.Key))
-                    {
-                        unmanaged.OtherData ??= [];
-                        unmanaged.OtherData.Add(field.Key, JsonSerializer.SerializeToElement(field.Value.ToString()));
-                    }
+                    if (names.Contains(field.Key) ||
+                        UnmanagedDataBindingTools.IsTypeHint(field.Key))
+                        continue;
+
+                    if (field.Value.Count == 0)
+                        continue;
+
+                    unmanaged.OtherData ??= [];
+
+                    unmanaged.OtherData[field.Key] = typeHints.TryGetValue(field.Key, out var typeName)
+                        ? UnmanagedDataBindingTools.ConvertValues(field.Value, typeName, jsonOptions)
+                        : ParseExtensionValues(field.Value, jsonOptions);
                 }
             }
 
@@ -64,27 +99,62 @@ namespace BlazorFeatures.Base.Server.Tools
                 new QueryBound<T>(model));
         }
 
-        private static string GetQueryParameterName(PropertyInfo property)
+        private static JsonElement ParseExtensionValue(
+            string raw,
+            JsonSerializerOptions? jsonOptions)
         {
-            var fromQuery = property.GetCustomAttribute<FromQueryAttribute>();
+            try
+            {
+                return JsonSerializer.Deserialize<JsonElement>(
+                    raw,
+                    jsonOptions);
+            }
+            catch (JsonException)
+            {
+                return JsonSerializer.SerializeToElement(
+                    raw,
+                    jsonOptions);
+            }
+        }
 
-            string? propName;
-            if (fromQuery == null)
-            {
-                propName = property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name;
-            }
-            else
-            {
-                propName = fromQuery.Name ?? property.Name;
-            }
-            return JsonNamingPolicy.CamelCase.ConvertName(propName);
+        private static JsonElement ParseExtensionValues(
+            StringValues values,
+            JsonSerializerOptions? jsonOptions)
+        {
+            if (values.Count == 1)
+                return ParseExtensionValue(values[0] ?? string.Empty, jsonOptions);
+
+            var parsedValues = new List<JsonElement>(values.Count);
+
+            foreach (var value in values)
+                parsedValues.Add(ParseExtensionValue(value ?? string.Empty, jsonOptions));
+
+            return JsonSerializer.SerializeToElement(parsedValues, jsonOptions);
+        }
+
+        private static bool IsExtensionDataProperty(
+            T model,
+            PropertyInfo property)
+            => property.GetCustomAttribute<JsonExtensionDataAttribute>() is not null ||
+               model is IWithUnmanagedData &&
+               property.Name == nameof(IWithUnmanagedData.OtherData);
+
+        private static string GetQueryParameterName(
+            PropertyInfo property)
+        {
+            var name = property.GetCustomAttribute<Microsoft.AspNetCore.Mvc.FromQueryAttribute>()?.Name ??
+                property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ??
+                property.Name;
+
+            return JsonNamingPolicy.CamelCase.ConvertName(name);
         }
 
         private static void BindProperty(
             T model,
             PropertyInfo prop,
             string name,
-            IQueryCollection query)
+            IQueryCollection query,
+            JsonSerializerOptions? jsonOptions)
         {
             if (!query.TryGetValue(name, out StringValues values))
                 return;
@@ -93,7 +163,13 @@ namespace BlazorFeatures.Base.Server.Tools
             {
                 if (prop.PropertyType.IsArray)
                 {
-                    BindArray(model, prop, name, values);
+                    BindArray(
+                        model,
+                        prop,
+                        name,
+                        values,
+                        jsonOptions);
+
                     return;
                 }
 
@@ -102,8 +178,11 @@ namespace BlazorFeatures.Base.Server.Tools
                 if (raw is null)
                     return;
 
-                var nullableType = Nullable.GetUnderlyingType(prop.PropertyType);
-                var targetType = nullableType ?? prop.PropertyType;
+                var nullableType =
+                    Nullable.GetUnderlyingType(prop.PropertyType);
+
+                var targetType =
+                    nullableType ?? prop.PropertyType;
 
                 if (string.IsNullOrWhiteSpace(raw))
                 {
@@ -123,7 +202,10 @@ namespace BlazorFeatures.Base.Server.Tools
                         $"Il parametro '{name}' non può essere vuoto.");
                 }
 
-                var value = ConvertValue(raw, targetType);
+                var value = ConvertValue(
+                    raw,
+                    targetType,
+                    jsonOptions);
 
                 prop.SetValue(model, value);
             }
@@ -131,7 +213,8 @@ namespace BlazorFeatures.Base.Server.Tools
                 ex is FormatException
                 or InvalidCastException
                 or NotSupportedException
-                or ArgumentException)
+                or ArgumentException
+                or JsonException)
             {
                 throw new BadHttpRequestException(
                     $"Il parametro query '{name}' non è valido " +
@@ -145,13 +228,17 @@ namespace BlazorFeatures.Base.Server.Tools
             T model,
             PropertyInfo prop,
             string name,
-            StringValues values)
+            StringValues values,
+            JsonSerializerOptions? jsonOptions)
         {
-            var elementType = prop.PropertyType.GetElementType()
+            var elementType =
+                prop.PropertyType.GetElementType()
                 ?? throw new InvalidOperationException(
                     $"Impossibile determinare il tipo degli elementi di '{prop.Name}'.");
 
-            var array = Array.CreateInstance(elementType, values.Count);
+            var array = Array.CreateInstance(
+                elementType,
+                values.Count);
 
             for (var index = 0; index < values.Count; index++)
             {
@@ -163,37 +250,49 @@ namespace BlazorFeatures.Base.Server.Tools
                         $"Il valore {index + 1} del parametro '{name}' è vuoto.");
                 }
 
+                var nullableElementType =
+                    Nullable.GetUnderlyingType(elementType);
+
+                var targetType =
+                    nullableElementType ?? elementType;
+
                 array.SetValue(
-                    ConvertValue(raw, elementType),
+                    ConvertValue(raw, targetType, jsonOptions),
                     index);
             }
 
             prop.SetValue(model, array);
         }
 
-        private static object? ConvertValue(string raw, Type targetType)
+        private static object? ConvertValue(
+            string raw,
+            Type targetType,
+            JsonSerializerOptions? jsonOptions)
         {
             if (targetType == typeof(string))
                 return raw;
 
             if (targetType.IsEnum)
-                return Enum.Parse(targetType, raw, ignoreCase: true);
-
-            var converter = TypeDescriptor.GetConverter(targetType);
-
-            if (!converter.CanConvertFrom(typeof(string)))
             {
-                throw new NotSupportedException(
-                    $"Il tipo '{targetType.Name}' non può essere convertito da stringa.");
+                return Enum.Parse(
+                    targetType,
+                    raw,
+                    ignoreCase: true);
             }
 
-            return converter.ConvertFrom(
-                context: null,
-                culture: CultureInfo.InvariantCulture,
-                value: raw);
+            var converter =
+                TypeDescriptor.GetConverter(targetType);
+
+            if (converter.CanConvertFrom(typeof(string)))
+                return converter.ConvertFromInvariantString(raw);
+
+            return JsonSerializer.Deserialize(raw, targetType, jsonOptions)
+                ?? throw new JsonException(
+                    $"Il JSON per il tipo '{targetType.Name}' ha prodotto un valore null.");
         }
 
-        public static implicit operator T(QueryBound<T> queryBound)
+        public static implicit operator T(
+            QueryBound<T> queryBound)
             => queryBound.Value;
     }
 }
