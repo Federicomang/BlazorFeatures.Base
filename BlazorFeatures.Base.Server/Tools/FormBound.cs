@@ -1,4 +1,5 @@
 ﻿using BlazorFeatures.Abstractions.Interfaces;
+using BlazorFeatures.Abstractions.Tools;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Json;
@@ -134,6 +135,30 @@ namespace BlazorFeatures.Base.Server.Tools
             IFormCollection form,
             JsonSerializerOptions? jsonOptions)
         {
+            var arrayElementType = prop.PropertyType.GetElementType();
+
+            if (arrayElementType == typeof(MultipartFileData))
+            {
+                prop.SetValue(
+                    model,
+                    form.Files.GetFiles(name).Select(CreateMultipartFileData).ToArray());
+                return;
+            }
+
+            if (prop.PropertyType == typeof(MultipartFileData))
+            {
+                var file = form.Files.GetFile(name);
+                prop.SetValue(model, file is null ? null : CreateMultipartFileData(file));
+                return;
+            }
+
+            if (arrayElementType is not null &&
+                typeof(IFormFile).IsAssignableFrom(arrayElementType))
+            {
+                prop.SetValue(model, form.Files.GetFiles(name).ToArray());
+                return;
+            }
+
             if (typeof(IFormFile).IsAssignableFrom(prop.PropertyType))
             {
                 prop.SetValue(model, form.Files.GetFile(name));
@@ -164,6 +189,20 @@ namespace BlazorFeatures.Base.Server.Tools
                     : ConvertValue(raw, targetType, jsonOptions);
 
             prop.SetValue(model, value);
+        }
+
+        private static MultipartFileData CreateMultipartFileData(IFormFile file)
+        {
+            var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var header in file.Headers)
+                headers[header.Key] = header.Value.Select(value => value ?? string.Empty).ToArray();
+
+            return new MultipartFileData(
+                file.OpenReadStream,
+                file.FileName,
+                file.ContentType,
+                headers);
         }
 
         private static void BindArray(

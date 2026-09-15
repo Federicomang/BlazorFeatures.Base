@@ -13,6 +13,8 @@ namespace BlazorFeatures.Abstractions.Sse
 
         public string ResponseEventKeyword { get; set; } = "feature_response";
 
+        public bool DeserializeOnlyLastForResponse { get; set; } = true;
+
         public JsonSerializerOptions? JsonSerializerOptions { get; set; }
 
         public async Task<FeatureResponse<T>> GenerateFeatureResponse(HttpResponseMessage response, CancellationToken cancellationToken)

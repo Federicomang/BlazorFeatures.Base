@@ -1,7 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using System.Collections;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -10,73 +9,73 @@ namespace BlazorFeatures.Base.Server.Tools
 {
     public class HttpTools : Abstractions.Tools.HttpTools
     {
-        public new static string ToUrlEncodedString(object obj, JsonSerializerOptions? jsonOptions = null)
-            => ToUrlEncodedStringCore(obj, null, jsonOptions);
+        public new static string ToQueryString(
+            object obj,
+            JsonSerializerOptions? jsonOptions = null)
+            => ToQueryStringCore(obj, null, jsonOptions, GetQueryParameterName);
 
-        public new static string ToUrlEncodedString(
+        public new static string ToQueryString(
             object obj,
             JsonSerializerOptions? jsonOptions,
             IReadOnlyDictionary<string, string> typeHints)
-            => ToUrlEncodedStringCore(obj, typeHints, jsonOptions);
+            => ToQueryStringCore(obj, typeHints, jsonOptions, GetQueryParameterName);
 
-        private static string ToUrlEncodedStringCore(
+        public new static MultipartFormDataContent ToMultipartFormDataContent(
             object obj,
-            IReadOnlyDictionary<string, string>? typeHints,
+            JsonSerializerOptions? jsonOptions = null)
+            => ToMultipartFormDataContentCore(
+                obj, null, jsonOptions, GetFormParameterName, AddServerMultipartValue);
+
+        public new static MultipartFormDataContent ToMultipartFormDataContent(
+            object obj,
+            JsonSerializerOptions? jsonOptions,
+            IReadOnlyDictionary<string, string> typeHints)
+            => ToMultipartFormDataContentCore(
+                obj, typeHints, jsonOptions, GetFormParameterName, AddServerMultipartValue);
+
+        private static void AddServerMultipartValue(
+            MultipartFormDataContent content,
+            string name,
+            object value,
             JsonSerializerOptions? jsonOptions)
         {
-            ArgumentNullException.ThrowIfNull(obj);
-
-            var pairs = new List<string>();
-
-            foreach (var property in obj.GetType()
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            if (value is IFormFile file)
             {
-                if (!property.CanRead)
-                    continue;
-
-                var propertyValue = property.GetValue(obj);
-
-                if (propertyValue is null)
-                    continue;
-
-                if (IsExtensionDataProperty(obj, property) &&
-                    propertyValue is IDictionary dictionary)
-                {
-                    foreach (var keyObject in dictionary.Keys)
-                    {
-                        if (keyObject is null)
-                            continue;
-
-                        var value = dictionary[keyObject];
-
-                        if (value is null)
-                            continue;
-
-                        var key = Convert.ToString(
-                            keyObject,
-                            CultureInfo.InvariantCulture)!;
-
-                        AddValue(pairs, key, value, jsonOptions);
-                    }
-
-                    continue;
-                }
-
-                var name = GetQueryParameterName(property);
-
-                AddValue(pairs, name, propertyValue, jsonOptions);
+                AddMultipartFile(
+                    content,
+                    name,
+                    file.OpenReadStream,
+                    file.FileName,
+                    CopyHeaders(file.Headers));
+                return;
             }
 
-            AddTypeHints(pairs, typeHints);
-
-            return string.Join("&", pairs);
+            AddMultipartValue(content, name, value, jsonOptions);
         }
 
-        private static string GetQueryParameterName(
-            PropertyInfo property)
+        private static IReadOnlyDictionary<string, string[]> CopyHeaders(
+            IHeaderDictionary headers)
+        {
+            var result = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var header in headers)
+                result[header.Key] = header.Value.Select(value => value ?? string.Empty).ToArray();
+
+            return result;
+        }
+
+        private static string GetQueryParameterName(PropertyInfo property)
         {
             var name = property.GetCustomAttribute<FromQueryAttribute>()?.Name ??
-                property.GetCustomAttribute<FromFormAttribute>()?.Name ??
+                property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ??
+                property.Name;
+
+            return JsonNamingPolicy.CamelCase.ConvertName(name);
+        }
+
+        private static string GetFormParameterName(PropertyInfo property)
+        {
+            var name = property.GetCustomAttribute<FromFormAttribute>()?.Name ??
                 property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ??
                 property.Name;
 

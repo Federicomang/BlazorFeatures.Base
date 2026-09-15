@@ -9,9 +9,24 @@ namespace BlazorFeatures.Base.Server.Extensions
 {
     public static class HttpContextExtensions
     {
-        public static async Task RunFeature<Response>(this HttpContext context, IFeatureService featureService, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
+        public class RunFeatureConfig
         {
-            _ = await RunFeatureAndGetResult(context, featureService, request, cancellationToken);
+            public IFeatureService? FeatureService { get; set; }
+
+            public JsonSerializerOptions? JsonSerializerOptions { get; set; }
+
+            public IHttpFeatureContext FeatureContext { get; private set; }
+
+            internal RunFeatureConfig(HttpFeatureContext featureContext)
+            {
+                FeatureContext = featureContext;
+                JsonSerializerOptions = featureContext.HttpContext.RequestServices.GetService<IOptions<JsonSerializerOptions>>()?.Value;
+            }
+        }
+
+        public static async Task RunFeature<Response>(this HttpContext context, IBaseFeatureRequest<Response> request, Action<RunFeatureConfig>? configBuilder, CancellationToken cancellationToken = default) where Response : class
+        {
+            _ = await RunFeatureAndGetResult(context, request, configBuilder, cancellationToken);
         }
 
         public static async Task RunFeature<Response>(this HttpContext context, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
@@ -21,11 +36,10 @@ namespace BlazorFeatures.Base.Server.Extensions
 
         public static async Task<FeatureResponse<Response>> RunFeatureAndGetResult<Response>(this HttpContext context, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
         {
-            var featureService = context.RequestServices.GetRequiredService<IFeatureService>();
-            return await RunFeatureAndGetResult(context, featureService, request, cancellationToken);
+            return await RunFeatureAndGetResult(context, request, null, cancellationToken);
         }
 
-        public static async Task<FeatureResponse<Response>> RunFeatureAndGetResult<Response>(this HttpContext context, IFeatureService featureService, IBaseFeatureRequest<Response> request, CancellationToken cancellationToken = default) where Response : class
+        public static async Task<FeatureResponse<Response>> RunFeatureAndGetResult<Response>(this HttpContext context, IBaseFeatureRequest<Response> request, Action<RunFeatureConfig>? configBuilder, CancellationToken cancellationToken = default) where Response : class
         {
             if (cancellationToken == default)
             {
@@ -33,9 +47,11 @@ namespace BlazorFeatures.Base.Server.Extensions
             }
 
             var featureContext = new HttpFeatureContext(context);
+            var config = new RunFeatureConfig(featureContext);
+            configBuilder?.Invoke(config);
+            var featureService = config.FeatureService ?? context.RequestServices.GetRequiredService<IFeatureService>();
             var response = await featureService.Run(request, featureContext, cancellationToken);
-            var jsonOptions = context.RequestServices.GetService<IOptions<JsonSerializerOptions>>()?.Value;
-            await featureContext.ApplyApiFeatureResponse(request, response, jsonOptions);
+            await featureContext.ApplyApiFeatureResponse(request, response, config.JsonSerializerOptions);
             return response;
         }
 

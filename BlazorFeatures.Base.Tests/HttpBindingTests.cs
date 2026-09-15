@@ -26,7 +26,7 @@ public class HttpBindingTests
             }
         };
 
-        var encoded = ServerHttpTools.ToUrlEncodedString(source);
+        var encoded = ServerHttpTools.ToQueryString(source);
         var parsed = QueryHelpers.ParseQuery(encoded);
 
         Assert.Equal(["2", "3", "4"], parsed["numbers"].Select(value => value!).ToArray());
@@ -109,7 +109,7 @@ public class HttpBindingTests
             ["ids"] = UrlEncodedValueTypes.Int32
         };
 
-        var encoded = ServerHttpTools.ToUrlEncodedString(
+        var encoded = ServerHttpTools.ToQueryString(
             source,
             jsonOptions: null,
             typeHints: hints);
@@ -184,6 +184,71 @@ public class HttpBindingTests
                 .BindAsync(context, null!));
     }
 
+    [Fact]
+    public async Task Multipart_round_trip_uses_the_same_value_rules_and_supports_files()
+    {
+        var fileBytes = Encoding.UTF8.GetBytes("file content");
+        var source = new MultipartSourceModel
+        {
+            Name = "Federico",
+            Numbers = [2, 3, 4],
+            Detail = new DetailModel { Enabled = true, Label = "multipart" },
+            Document = new MultipartFileData(
+                new MemoryStream(fileBytes),
+                "document.txt",
+                "text/plain",
+                new Dictionary<string, string[]>
+                {
+                    ["X-Document-Id"] = ["42"],
+                    ["X-Multiple"] = ["one", "two"]
+                }),
+            Attachments =
+            [
+                new MultipartFileData(new MemoryStream([1]), "one.bin"),
+                new MultipartFileData(new MemoryStream([2]), "two.bin")
+            ],
+            OtherData = new Dictionary<string, JsonElement>
+            {
+                ["code"] = JsonSerializer.SerializeToElement(2)
+            }
+        };
+        var hints = new Dictionary<string, string>
+        {
+            ["code"] = UrlEncodedValueTypes.String
+        };
+
+        using var multipart = ServerHttpTools.ToMultipartFormDataContent(
+            source,
+            jsonOptions: null,
+            typeHints: hints);
+        var requestBody = new MemoryStream();
+        await multipart.CopyToAsync(requestBody);
+        requestBody.Position = 0;
+
+        var context = CreateContext();
+        context.Request.ContentType = multipart.Headers.ContentType!.ToString();
+        context.Request.ContentLength = requestBody.Length;
+        context.Request.Body = requestBody;
+
+        var bound = await BlazorFeatures.Base.Server.Tools.FormBound<MultipartTargetModel>
+            .BindAsync(context);
+        var model = bound!.Value;
+
+        Assert.Equal("Federico", model.Name);
+        Assert.Equal([2, 3, 4], model.Numbers!);
+        Assert.Equal("multipart", model.Detail!.Label);
+        Assert.Equal("2", model.OtherData!["code"].GetString());
+        Assert.Equal("document.txt", model.Document!.FileName);
+        Assert.Equal("text/plain", model.Document.ContentType);
+        Assert.Equal(["42"], model.Document.Headers["X-Document-Id"]);
+        Assert.Equal(["one, two"], model.Document.Headers["X-Multiple"]);
+        Assert.Contains("Content-Disposition", model.Document.Headers.Keys);
+        Assert.Equal(["one.bin", "two.bin"], model.Attachments!.Select(file => file.FileName));
+
+        using var reader = new StreamReader(model.Document.Content);
+        Assert.Equal("file content", await reader.ReadToEndAsync());
+    }
+
     private static DefaultHttpContext CreateContext()
     {
         var services = new ServiceCollection()
@@ -209,5 +274,25 @@ public class HttpBindingTests
     {
         public bool Enabled { get; set; }
         public string? Label { get; set; }
+    }
+
+    private sealed class MultipartSourceModel : IWithUnmanagedData
+    {
+        public string? Name { get; set; }
+        public int[]? Numbers { get; set; }
+        public DetailModel? Detail { get; set; }
+        public MultipartFileData? Document { get; set; }
+        public MultipartFileData[]? Attachments { get; set; }
+        public Dictionary<string, JsonElement>? OtherData { get; set; }
+    }
+
+    private sealed class MultipartTargetModel : IWithUnmanagedData
+    {
+        public string? Name { get; set; }
+        public int[]? Numbers { get; set; }
+        public DetailModel? Detail { get; set; }
+        public MultipartFileData? Document { get; set; }
+        public MultipartFileData[]? Attachments { get; set; }
+        public Dictionary<string, JsonElement>? OtherData { get; set; }
     }
 }

@@ -4,7 +4,6 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-
 #if NET10_0_OR_GREATER
 using System.Text;
 using System.Net.ServerSentEvents;
@@ -27,7 +26,7 @@ namespace BlazorFeatures.Abstractions.Extensions
             return await FeatureResponse<T>.FromHttpResponse(response, customDeserialize, cancellationToken);
         }
 
-        public static async Task<FeatureResponse<T>> SSE<T>(this HttpClient client, HttpRequestMessage requestMessage, ISseRequest request, SseOptions<T>? options = null, CancellationToken cancellationToken = default) where T : class
+        public static async Task<FeatureResponse<T>> SSE<T>(this HttpClient client, HttpRequestMessage requestMessage, ISseRequest? request, SseOptions<T>? options = null, CancellationToken cancellationToken = default) where T : class
         {
             options ??= new();
             var response = await client.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -49,6 +48,7 @@ namespace BlazorFeatures.Abstractions.Extensions
                 return await options.GenerateFeatureResponse(response, cancellationToken);
             }
 
+            string? lastDataString = null;
             FeatureResponse<T>? featureRes = null;
 
 #if NET10_0_OR_GREATER
@@ -62,10 +62,20 @@ namespace BlazorFeatures.Abstractions.Extensions
             {
                 if (item.EventType == options.ResponseEventKeyword)
                 {
-                    featureRes = await options.GenerateFeatureResponse(item.Data);
+                    if (options.DeserializeOnlyLastForResponse)
+                    {
+                        lastDataString = item.Data;
+                    }
+                    else
+                    {
+                        featureRes = await options.GenerateFeatureResponse(item.Data);
+                    }
                 }
 
-                await request.OnEventSse(item, options.JsonSerializerOptions);
+                if(request is not null)
+                {
+                    await request.OnEventSse(new SseEvent(item), options.JsonSerializerOptions);
+                }
             }
 #else
             using var stream = await response.Content.ReadAsStreamAsync();
@@ -91,11 +101,21 @@ namespace BlazorFeatures.Abstractions.Extensions
 
                         if (eventType == options.ResponseEventKeyword)
                         {
-                            featureRes = await options.GenerateFeatureResponse(data);
+                            if(options.DeserializeOnlyLastForResponse)
+                            {
+                                lastDataString = data;
+                            }
+                            else
+                            {
+                                featureRes = await options.GenerateFeatureResponse(data);
+                            }
                         }
 
                         var sseEvent = new SseEvent(eventId!, eventType!, data, retryMilliseconds);
-                        await request.OnEventSse(sseEvent, options.JsonSerializerOptions);
+                        if(request is not null)
+                        {
+                            await request.OnEventSse(sseEvent, options.JsonSerializerOptions);
+                        }
                     }
 
                     dataLines.Clear();
@@ -153,6 +173,12 @@ namespace BlazorFeatures.Abstractions.Extensions
                 }
             }
 #endif
+
+            if(options.DeserializeOnlyLastForResponse && lastDataString is not null)
+            {
+                featureRes = await options.GenerateFeatureResponse(lastDataString);
+            }
+
             return featureRes ?? FeatureResponse<T>.AsFailure(messages: [$"The event \"{options.ResponseEventKeyword}\" not arrived, the response cannot be processed"]);
         }
     }
