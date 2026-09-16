@@ -41,7 +41,7 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext());
+                new BaseFeatureContext(new TestRequest()));
 
         Assert.False(response.Success);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -65,7 +65,7 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext());
+                new BaseFeatureContext(new TestRequest()));
 
         Assert.False(response.Success);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -95,7 +95,7 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext());
+                new BaseFeatureContext(new TestRequest()));
 
         Assert.True(response.Success);
         Assert.Equal(
@@ -118,7 +118,7 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext());
+                new BaseFeatureContext(new TestRequest()));
 
         Assert.False(response.Success);
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
@@ -133,7 +133,8 @@ public class ServerFeatureServiceTests
         var handler = new DelegateHandler<TestResponse>(() =>
             throw new InvalidOperationException("failure"));
         var featureContext = new HttpFeatureContext(
-            new Microsoft.AspNetCore.Http.DefaultHttpContext());
+            new Microsoft.AspNetCore.Http.DefaultHttpContext(),
+            new TestRequest());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             scope.ServiceProvider
@@ -164,7 +165,7 @@ public class ServerFeatureServiceTests
                     handler,
                     typeof(TestRequest),
                     new TestRequest(),
-                    new BaseFeatureContext(),
+                    new BaseFeatureContext(new TestRequest()),
                     cancellation.Token));
     }
 
@@ -184,7 +185,7 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext());
+                new BaseFeatureContext(new TestRequest()));
 
         Assert.True(response.Success);
         Assert.Equal(0, principalProvider.InvocationCount);
@@ -208,7 +209,7 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext());
+                new BaseFeatureContext(new TestRequest()));
 
         Assert.True(response.Success);
         Assert.Equal(1, principalProvider.InvocationCount);

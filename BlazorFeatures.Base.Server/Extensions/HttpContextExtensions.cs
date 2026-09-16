@@ -46,7 +46,7 @@ namespace BlazorFeatures.Base.Server.Extensions
                 cancellationToken = context.RequestAborted;
             }
 
-            var featureContext = new HttpFeatureContext(context);
+            var featureContext = new HttpFeatureContext(context, request);
             var config = new RunFeatureConfig(featureContext);
             configBuilder?.Invoke(config);
             var featureService = config.FeatureService ?? context.RequestServices.GetRequiredService<IFeatureService>();

@@ -13,14 +13,19 @@ public class FeatureTelemetryTests
     public async Task Run_emits_an_activity_without_recording_the_payload()
     {
         Activity? recordedActivity = null;
-        using var listener = CreateActivityListener(activity => recordedActivity = activity);
+        using var listener = CreateActivityListener(activity =>
+        {
+            if (activity.DisplayName == $"Feature {nameof(TelemetryRequest)}")
+                recordedActivity = activity;
+        });
         using var provider = CreateProvider(services =>
             services.AddScoped<IBaseFeature<TelemetryRequest, TelemetryResponse>, SuccessfulFeature>());
         using var scope = provider.CreateScope();
-        var context = new BaseFeatureContext();
+        var request = new TelemetryRequest("do-not-record");
+        var context = new BaseFeatureContext(request);
 
         var response = await scope.ServiceProvider.GetRequiredService<IFeatureService>()
-            .Run(new TelemetryRequest("do-not-record"), context);
+            .Run(request, context);
 
         Assert.True(response.Success);
         Assert.NotNull(recordedActivity);
@@ -52,20 +57,29 @@ public class FeatureTelemetryTests
         Assert.Equal(parent.TraceId, child.TraceId);
         Assert.Equal(parent.SpanId, child.ParentSpanId);
         Assert.Equal(parent.GetTagItem("blazorfeatures.operation_id"), child.GetTagItem("blazorfeatures.operation_id"));
+        Assert.Equal(1, parent.GetTagItem("blazorfeatures.chain.length"));
+        Assert.Equal(2, child.GetTagItem("blazorfeatures.chain.length"));
+        Assert.NotNull(parent.GetTagItem("blazorfeatures.node_id"));
+        Assert.Null(parent.GetTagItem("blazorfeatures.parent_node_id"));
+        Assert.Equal(parent.GetTagItem("blazorfeatures.node_id"), child.GetTagItem("blazorfeatures.parent_node_id"));
     }
 
     [Fact]
     public async Task Exception_details_are_redacted_by_default()
     {
         Activity? recordedActivity = null;
-        using var listener = CreateActivityListener(activity => recordedActivity = activity);
+        using var listener = CreateActivityListener(activity =>
+        {
+            if (activity.DisplayName == $"Feature {nameof(ThrowingRequest)}")
+                recordedActivity = activity;
+        });
         using var provider = CreateProvider(services =>
-            services.AddScoped<IBaseFeature<TelemetryRequest, TelemetryResponse>, ThrowingFeature>());
+            services.AddScoped<IBaseFeature<ThrowingRequest, TelemetryResponse>, ThrowingFeature>());
         using var scope = provider.CreateScope();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             scope.ServiceProvider.GetRequiredService<IFeatureService>()
-                .Run(new TelemetryRequest("secret")));
+                .Run(new ThrowingRequest("secret")));
 
         Assert.NotNull(recordedActivity);
         Assert.Equal(ActivityStatusCode.Error, recordedActivity.Status);
@@ -113,7 +127,7 @@ public class FeatureTelemetryTests
     {
         var services = new ServiceCollection();
         services.AddOptions<FeatureTelemetryOptions>();
-        services.AddScoped<IFeatureService, FeatureService>();
+        services.AddSingleton<IFeatureService, FeatureService>();
         configure(services);
         return services.BuildServiceProvider();
     }
@@ -132,6 +146,8 @@ public class FeatureTelemetryTests
     }
 
     public sealed record TelemetryRequest(string Secret) : IBaseFeatureRequest<TelemetryResponse>;
+
+    public sealed record ThrowingRequest(string Secret) : IBaseFeatureRequest<TelemetryResponse>;
 
     public sealed class ParentRequest : IBaseFeatureRequest<TelemetryResponse>;
 
@@ -181,15 +197,15 @@ public class FeatureTelemetryTests
             CancellationToken cancellationToken = default) => Success();
     }
 
-    public sealed class ThrowingFeature : IBaseFeature<TelemetryRequest, TelemetryResponse>
+    public sealed class ThrowingFeature : IBaseFeature<ThrowingRequest, TelemetryResponse>
     {
         public Task<FeatureResponse<TelemetryResponse>> HandleClient(
-            TelemetryRequest request,
+            ThrowingRequest request,
             IFeatureContext featureContext,
             CancellationToken cancellationToken = default) => Throw();
 
         public Task<FeatureResponse<TelemetryResponse>> HandleServer(
-            TelemetryRequest request,
+            ThrowingRequest request,
             IFeatureContext featureContext,
             CancellationToken cancellationToken = default) => Throw();
 

@@ -1,16 +1,21 @@
 ﻿using BlazorFeatures.Abstractions.Enums;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace BlazorFeatures.Abstractions
 {
     public interface IFeatureContext
     {
+        public Guid NodeId { get; }
+
         public Guid OperationId { get; }
 
         public FeatureInvocationSource InvocationSource { get; }
 
-        public List<IBaseFeatureRequest> FeatureChain { get; }
+        public IBaseFeatureRequest FeatureRequest { get; }
+
+        public ConcurrentDictionary<Guid, FeatureChainInfo> FeatureChain { get; }
 
         /// <summary>
         /// Gets the values visible to the current feature. Temporary values take
@@ -20,8 +25,8 @@ namespace BlazorFeatures.Abstractions
 
         /// <summary>
         /// Gets the values that are valid for the current feature invocation.
-        /// Values written by the current feature are passed only to its next
-        /// direct feature invocation.
+        /// Values written by the current feature are passed to every direct
+        /// feature invocation created from this context.
         /// </summary>
         public IDictionary<string, object> TempValues { get; }
 
@@ -33,6 +38,6 @@ namespace BlazorFeatures.Abstractions
         /// <summary>
         /// Creates the context scope used for the next direct feature invocation.
         /// </summary>
-        public IFeatureContext CreateInvocationScope();
+        public IFeatureContext CreateInvocationScope(IBaseFeatureRequest featureRequest);
     }
 }

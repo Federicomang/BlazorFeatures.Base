@@ -6,7 +6,7 @@ namespace BlazorFeatures.Base.Server.Extensions
     {
         public static void SetHttpResult(this IHttpFeatureContext context, IResult result)
         {
-            context.SetHttpResult(context.FeatureChain.Last(), result);
+            context.SetHttpResult(context.FeatureRequest, result);
         }
     }
 }

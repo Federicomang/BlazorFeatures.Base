@@ -131,13 +131,11 @@ namespace BlazorFeatures.Base
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-        internal IReadOnlyDictionary<string, object> TakeOutgoingValues()
+        internal IReadOnlyDictionary<string, object> GetOutgoingValuesSnapshot()
         {
             lock (_sync)
             {
-                var result = new Dictionary<string, object>(_outgoingValues);
-                _outgoingValues.Clear();
-                return result;
+                return new Dictionary<string, object>(_outgoingValues);
             }
         }
 
