@@ -1,4 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using BlazorFeatures.Abstractions;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -9,6 +11,11 @@ namespace BlazorFeatures.Base.Handler
     {
         public void HandlePolicies(List<(string Name, MethodInfo Builder)> policies)
         {
+            options.Services.TryAddEnumerable(
+                ServiceDescriptor.Scoped<
+                    IFeatureCallerContextEnricher,
+                    AuthenticationFeatureCallerContextEnricher>());
+
             if (policies.Count > 0)
             {
                 options.Services.AddAuthorizationCore(options =>

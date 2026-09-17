@@ -21,15 +21,20 @@ public class ServerFeatureServiceTests
         Assert.Contains(services, descriptor =>
             descriptor.ServiceType == typeof(IServerFeatureService)
             && descriptor.ImplementationType == typeof(ServerFeatureService));
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(IFeatureService)
+            && descriptor.ImplementationType == typeof(FeatureService)
+            && descriptor.Lifetime == ServiceLifetime.Scoped);
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(IFeatureCallerContextEnricher)
+            && descriptor.Lifetime == ServiceLifetime.Scoped);
     }
 
     [Fact]
     public async Task Mandatory_authorization_runs_before_addon_behaviors()
     {
         var behavior = new DenyingMarkerBehavior();
-        using var provider = CreateProvider(
-            new ClaimsPrincipal(new ClaimsIdentity()),
-            behavior);
+        using var provider = CreateProvider(behavior);
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             throw new InvalidOperationException("The handler must not run."));
@@ -53,7 +58,7 @@ public class ServerFeatureServiceTests
     public async Task Addon_behavior_can_short_circuit_a_marked_feature()
     {
         var behavior = new DenyingMarkerBehavior();
-        using var provider = CreateProvider(AuthenticatedPrincipal(), behavior);
+        using var provider = CreateProvider(behavior);
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             Task.FromResult(FeatureResponse<TestResponse>.AsSuccess(new())));
@@ -78,7 +83,6 @@ public class ServerFeatureServiceTests
     {
         var events = new List<string>();
         using var provider = CreateProvider(
-            AuthenticatedPrincipal(),
             new RecordingBehavior(20, "second", events),
             new RecordingBehavior(10, "first", events));
         using var scope = provider.CreateScope();
@@ -106,7 +110,7 @@ public class ServerFeatureServiceTests
     [Fact]
     public async Task In_process_exceptions_are_converted_to_a_failure_response()
     {
-        using var provider = CreateProvider(AuthenticatedPrincipal());
+        using var provider = CreateProvider();
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             throw new InvalidOperationException("failure"));
@@ -128,7 +132,7 @@ public class ServerFeatureServiceTests
     [Fact]
     public async Task Http_exceptions_are_rethrown_to_the_host_pipeline()
     {
-        using var provider = CreateProvider(AuthenticatedPrincipal());
+        using var provider = CreateProvider();
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             throw new InvalidOperationException("failure"));
@@ -152,7 +156,7 @@ public class ServerFeatureServiceTests
     {
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
-        using var provider = CreateProvider(AuthenticatedPrincipal());
+        using var provider = CreateProvider();
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             Task.FromCanceled<FeatureResponse<TestResponse>>(cancellation.Token));
@@ -170,10 +174,9 @@ public class ServerFeatureServiceTests
     }
 
     [Fact]
-    public async Task Principal_is_not_resolved_for_a_plain_feature_when_no_behavior_needs_it()
+    public async Task Plain_feature_uses_the_captured_anonymous_user()
     {
-        var principalProvider = new StubPrincipalProvider(AuthenticatedPrincipal());
-        using var provider = CreateProvider(principalProvider);
+        using var provider = CreateProvider();
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             Task.FromResult(FeatureResponse<TestResponse>.AsSuccess(new())));
@@ -188,16 +191,12 @@ public class ServerFeatureServiceTests
                 new BaseFeatureContext(new TestRequest()));
 
         Assert.True(response.Success);
-        Assert.Equal(0, principalProvider.InvocationCount);
     }
 
     [Fact]
-    public async Task Principal_is_cached_when_a_behavior_requests_it_more_than_once()
+    public async Task Captured_user_is_reused_when_a_behavior_requests_it_more_than_once()
     {
-        var principalProvider = new StubPrincipalProvider(AuthenticatedPrincipal());
-        using var provider = CreateProvider(
-            principalProvider,
-            new PrincipalReadingBehavior());
+        using var provider = CreateProvider(new PrincipalReadingBehavior());
         using var scope = provider.CreateScope();
         var handler = new DelegateHandler<TestResponse>(() =>
             Task.FromResult(FeatureResponse<TestResponse>.AsSuccess(new())));
@@ -209,19 +208,37 @@ public class ServerFeatureServiceTests
                 handler,
                 typeof(TestRequest),
                 new TestRequest(),
-                new BaseFeatureContext(new TestRequest()));
+                new BaseFeatureContext(
+                    new TestRequest(),
+                    callerContext: new FeatureCallerContext(AuthenticatedPrincipal())));
 
         Assert.True(response.Success);
-        Assert.Equal(1, principalProvider.InvocationCount);
+    }
+
+    [Fact]
+    public async Task Captured_context_user_is_used_for_authorization()
+    {
+        using var provider = CreateProvider();
+        using var scope = provider.CreateScope();
+        var handler = new DelegateHandler<TestResponse>(() =>
+            Task.FromResult(FeatureResponse<TestResponse>.AsSuccess(new())));
+        var user = AuthenticatedPrincipal();
+
+        var response = await scope.ServiceProvider
+            .GetRequiredService<IServerFeatureService>()
+            .HandleServer(
+                new AuthorizedFeature(),
+                handler,
+                typeof(TestRequest),
+                new TestRequest(),
+                new BaseFeatureContext(
+                    new TestRequest(),
+                    callerContext: new FeatureCallerContext(user)));
+
+        Assert.True(response.Success);
     }
 
     private static ServiceProvider CreateProvider(
-        ClaimsPrincipal principal,
-        params IServerFeatureBehavior[] behaviors) =>
-        CreateProvider(new StubPrincipalProvider(principal), behaviors);
-
-    private static ServiceProvider CreateProvider(
-        IFeaturePrincipalProvider principalProvider,
         params IServerFeatureBehavior[] behaviors)
     {
         var services = new ServiceCollection();
@@ -229,7 +246,6 @@ public class ServerFeatureServiceTests
         services.AddAuthorization();
         services.AddOptions();
         services.AddHttpContextAccessor();
-        services.AddSingleton(principalProvider);
         foreach (var behavior in behaviors)
             services.AddSingleton(typeof(IServerFeatureBehavior), behavior);
         services.AddScoped<IServerFeatureService, ServerFeatureService>();
@@ -238,20 +254,6 @@ public class ServerFeatureServiceTests
 
     private static ClaimsPrincipal AuthenticatedPrincipal() =>
         new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "test")], "Test"));
-
-    private sealed class StubPrincipalProvider(ClaimsPrincipal principal) :
-        IFeaturePrincipalProvider
-    {
-        public int InvocationCount { get; private set; }
-
-        public ValueTask<ClaimsPrincipal> GetPrincipalAsync(
-            IFeatureContext featureContext,
-            CancellationToken cancellationToken = default)
-        {
-            InvocationCount++;
-            return ValueTask.FromResult(principal);
-        }
-    }
 
     private sealed class DelegateHandler<TResponse>(
         Func<Task<FeatureResponse<TResponse>>> handler) : IFeatureHandler<TResponse>
@@ -352,6 +354,12 @@ public class ServerFeatureServiceTests
         TestFeature,
         IRequiresAddonPermission,
         IBaseFeatureAuthorization
+    {
+        public void BuildPolicy(AuthorizationPolicyBuilder policy) =>
+            policy.RequireAuthenticatedUser();
+    }
+
+    private sealed class AuthorizedFeature : TestFeature, IBaseFeatureAuthorization
     {
         public void BuildPolicy(AuthorizationPolicyBuilder policy) =>
             policy.RequireAuthenticatedUser();

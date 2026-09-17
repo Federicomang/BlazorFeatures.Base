@@ -1,6 +1,8 @@
 ﻿#nullable disable
 
+using BlazorFeatures.Abstractions.JsonConverters;
 using System;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,6 +36,7 @@ namespace BlazorFeatures.Abstractions.Tools
     /// Classe che fornisce un wrapper thread-safe per un valore generico
     /// utilizzando un lock standard
     /// </summary>
+    [JsonConverter(typeof(ObjectValueJsonConverterFactory))]
     public class ObjectValue<T>
     {
         // Oggetto utilizzato per il lock thread-safe
@@ -104,6 +107,7 @@ namespace BlazorFeatures.Abstractions.Tools
     /// Versione asincrona di ObjectValue che utilizza SemaphoreSlim
     /// per operazioni thread-safe asincrone
     /// </summary>
+    [JsonConverter(typeof(AsyncObjectValueJsonConverterFactory))]
     public class AsyncObjectValue<T>
     {
         // Semaforo per il controllo dell'accesso asincrono

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace BlazorFeatures.Abstractions
 {
@@ -12,6 +13,8 @@ namespace BlazorFeatures.Abstractions
         public Guid OperationId { get; }
 
         public FeatureInvocationSource InvocationSource { get; }
+
+        public FeatureCallerContext CallerContext { get; }
 
         public IBaseFeatureRequest FeatureRequest { get; }
 
@@ -36,8 +39,32 @@ namespace BlazorFeatures.Abstractions
         public IDictionary<string, object> PermanentValues { get; }
 
         /// <summary>
+        /// Gets the lifetime shared by all invocations that use the same
+        /// feature service scope.
+        /// </summary>
+        public FeatureScopeLifetime ScopeLifetime { get; }
+
+        /// <summary>
+        /// When enabled, direct child invocations reuse this feature's service
+        /// scope. It is disabled again on each child context.
+        /// </summary>
+        /// <remarks>
+        /// Do not enable this for parallel child invocations unless every
+        /// scoped service involved is safe for concurrent use.
+        /// </remarks>
+        public bool UseSameServiceScope { get; set; }
+
+        /// <summary>
+        /// Keeps the service scope alive until the supplied operation completes.
+        /// </summary>
+        public void DeferScopeDisposalUntil(Task operation);
+
+        /// <summary>
         /// Creates the context scope used for the next direct feature invocation.
         /// </summary>
-        public IFeatureContext CreateInvocationScope(IBaseFeatureRequest featureRequest);
+        public IFeatureContext CreateInvocationScope(
+            IBaseFeatureRequest featureRequest,
+            FeatureCallerContext? callerContext = null,
+            FeatureScopeLifetime? scopeLifetime = null);
     }
 }

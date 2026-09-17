@@ -165,7 +165,7 @@ namespace BlazorFeatures.Base.Extensions
                 ? (IFeatureSystemHandler)Activator.CreateInstance(featureHandlerType, [featureHandlerParams])!
                 : null;
 
-            services.AddSingleton<IFeatureService, FeatureService>();
+            services.AddScoped<IFeatureService, FeatureService>();
             services.AddOptions<FeatureTelemetryOptions>();
             services.AddSingleton(containerService);
             services.AddSingleton<IFeatureRegistry>(containerService);

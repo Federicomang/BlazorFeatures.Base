@@ -1,9 +1,12 @@
 using BlazorFeatures.Abstractions;
+using BlazorFeatures.Base.Extensions;
 using BlazorFeatures.Base.Server;
 using BlazorFeatures.Base.Server.Extensions;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Concurrent;
+using System.Security.Claims;
 
 namespace BlazorFeatures.Base.Tests;
 
@@ -49,6 +52,9 @@ public class FeatureContextValuesTests
         using var provider = CreateProvider();
         using var scope = provider.CreateScope();
         var httpContext = new DefaultHttpContext();
+        var httpUser = new ClaimsPrincipal(
+            new ClaimsIdentity([new Claim(ClaimTypes.Name, "http-user")], "Test"));
+        httpContext.User = httpUser;
         var request = new HttpRequest();
         var context = new HttpFeatureContext(httpContext, request);
 
@@ -58,6 +64,7 @@ public class FeatureContextValuesTests
 
         Assert.True(response.Success);
         Assert.Same(httpContext, HttpFeature.SeenHttpContext);
+        Assert.Same(httpUser, HttpFeature.SeenUser);
         Assert.True(context.TryGetHttpResult(request, out _));
         var node = Assert.Single(context.FeatureChain.Values);
         Assert.Null(node.ParentNodeId);
@@ -94,10 +101,45 @@ public class FeatureContextValuesTests
         Assert.Equal("two", context.PermanentValues["branch-2"]);
     }
 
-    private static ServiceProvider CreateProvider()
+    [Fact]
+    public async Task Caller_authentication_state_is_captured_before_feature_scopes_and_propagated()
+    {
+        var authenticationTracker = new AuthenticationStateTracker();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddFeatures(features =>
+            features.AddAssemblyContaining<ServerFeatureService>());
+        services.AddSingleton(authenticationTracker);
+        services.AddScoped<AuthenticationStateProvider>(serviceProvider =>
+            serviceProvider.GetRequiredService<AuthenticationStateTracker>().CreateProvider());
+        services.AddScoped<IFeatureCallerContextEnricher, TestValueCallerContextEnricher>();
+        services.AddScoped<IBaseFeature<AuthParentRequest, TestResponse>, AuthParentFeature>();
+        services.AddScoped<IBaseFeature<AuthChildRequest, TestResponse>, AuthChildFeature>();
+        services.AddSingleton<AuthExecutionRecorder>();
+        using var provider = services.BuildServiceProvider();
+        using var callerScope = provider.CreateScope();
+
+        var response = await callerScope.ServiceProvider
+            .GetRequiredService<IFeatureService>()
+            .Run(new AuthParentRequest());
+
+        Assert.True(response.Success);
+        Assert.Equal(1, authenticationTracker.CreatedProviders);
+        Assert.Equal(1, authenticationTracker.AuthenticationStateReads);
+        var users = provider.GetRequiredService<AuthExecutionRecorder>().UserNames.ToArray();
+        Assert.Equal(2, users.Length);
+        Assert.All(users, userName => Assert.Equal("caller-user", userName));
+        var callerValues = provider.GetRequiredService<AuthExecutionRecorder>()
+            .CallerValues.ToArray();
+        Assert.Equal(2, callerValues.Length);
+        Assert.All(callerValues, value => Assert.Equal("caller-value", value));
+    }
+
+    private static ServiceProvider CreateProvider(
+        Action<IServiceCollection>? configure = null)
     {
         var services = new ServiceCollection();
-        services.AddSingleton<IFeatureService, FeatureService>();
+        services.AddScoped<IFeatureService, FeatureService>();
         services.AddScoped<IBaseFeature<ParentRequest, TestResponse>, ParentFeature>();
         services.AddScoped<IBaseFeature<ChildRequest, TestResponse>, ChildFeature>();
         services.AddScoped<IBaseFeature<GrandchildRequest, TestResponse>, GrandchildFeature>();
@@ -106,6 +148,7 @@ public class FeatureContextValuesTests
         services.AddScoped<IBaseFeature<ParallelChildRequest, TestResponse>, ParallelChildFeature>();
         services.AddScoped<ScopedDependency>();
         services.AddSingleton<ParallelExecutionRecorder>();
+        configure?.Invoke(services);
         return services.BuildServiceProvider();
     }
 
@@ -120,6 +163,10 @@ public class FeatureContextValuesTests
     public sealed class ParallelParentRequest : IBaseFeatureRequest<TestResponse>;
 
     public sealed record ParallelChildRequest(int Branch) : IBaseFeatureRequest<TestResponse>;
+
+    public sealed class AuthParentRequest : IBaseFeatureRequest<TestResponse>;
+
+    public sealed class AuthChildRequest : IBaseFeatureRequest<TestResponse>;
 
     public sealed class TestResponse;
 
@@ -213,6 +260,8 @@ public class FeatureContextValuesTests
     {
         public static HttpContext? SeenHttpContext { get; private set; }
 
+        public static ClaimsPrincipal? SeenUser { get; private set; }
+
         public Task<FeatureResponse<TestResponse>> HandleClient(
             HttpRequest request,
             IFeatureContext featureContext,
@@ -227,6 +276,7 @@ public class FeatureContextValuesTests
         {
             var httpFeatureContext = Assert.IsAssignableFrom<IHttpFeatureContext>(featureContext);
             SeenHttpContext = httpFeatureContext.HttpContext;
+            SeenUser = featureContext.CallerContext.User;
             httpFeatureContext.SetHttpResult(Results.Ok());
             return Success();
         }
@@ -320,6 +370,111 @@ public class FeatureContextValuesTests
         Guid ScopeId,
         bool RequestMatchesContext,
         string TempValue);
+
+    public sealed class AuthParentFeature(
+        IFeatureService featureService,
+        AuthExecutionRecorder recorder) :
+        IBaseFeature<AuthParentRequest, TestResponse>
+    {
+        public Task<FeatureResponse<TestResponse>> HandleClient(
+            AuthParentRequest request,
+            IFeatureContext featureContext,
+            CancellationToken cancellationToken = default) =>
+            Handle(featureContext, cancellationToken);
+
+        public Task<FeatureResponse<TestResponse>> HandleServer(
+            AuthParentRequest request,
+            IFeatureContext featureContext,
+            CancellationToken cancellationToken = default) =>
+            Handle(featureContext, cancellationToken);
+
+        private Task<FeatureResponse<TestResponse>> Handle(
+            IFeatureContext featureContext,
+            CancellationToken cancellationToken)
+        {
+            recorder.Record(featureContext.CallerContext);
+            return featureService.Run(
+                new AuthChildRequest(),
+                featureContext,
+                cancellationToken);
+        }
+    }
+
+    public sealed class AuthChildFeature(AuthExecutionRecorder recorder) :
+        IBaseFeature<AuthChildRequest, TestResponse>
+    {
+        public Task<FeatureResponse<TestResponse>> HandleClient(
+            AuthChildRequest request,
+            IFeatureContext featureContext,
+            CancellationToken cancellationToken = default) => Handle(featureContext);
+
+        public Task<FeatureResponse<TestResponse>> HandleServer(
+            AuthChildRequest request,
+            IFeatureContext featureContext,
+            CancellationToken cancellationToken = default) => Handle(featureContext);
+
+        private Task<FeatureResponse<TestResponse>> Handle(IFeatureContext featureContext)
+        {
+            recorder.Record(featureContext.CallerContext);
+            return Success();
+        }
+    }
+
+    public sealed class AuthExecutionRecorder
+    {
+        public ConcurrentBag<string?> UserNames { get; } = [];
+
+        public ConcurrentBag<object> CallerValues { get; } = [];
+
+        public void Record(FeatureCallerContext callerContext)
+        {
+            UserNames.Add(callerContext.User.Identity?.Name);
+            CallerValues.Add(callerContext.Values["caller-value"]);
+        }
+    }
+
+    public sealed class TestValueCallerContextEnricher : IFeatureCallerContextEnricher
+    {
+        public ValueTask EnrichAsync(
+            FeatureCallerContextBuilder context,
+            CancellationToken cancellationToken = default)
+        {
+            context.Values["caller-value"] = "caller-value";
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public sealed class AuthenticationStateTracker
+    {
+        private int _createdProviders;
+        private int _authenticationStateReads;
+
+        public int CreatedProviders => _createdProviders;
+
+        public int AuthenticationStateReads => _authenticationStateReads;
+
+        public AuthenticationStateProvider CreateProvider()
+        {
+            var providerNumber = Interlocked.Increment(ref _createdProviders);
+            var user = providerNumber == 1
+                ? new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.Name, "caller-user")],
+                    "Test"))
+                : new ClaimsPrincipal(new ClaimsIdentity());
+            return new TrackingAuthenticationStateProvider(this, user);
+        }
+
+        private sealed class TrackingAuthenticationStateProvider(
+            AuthenticationStateTracker tracker,
+            ClaimsPrincipal user) : AuthenticationStateProvider
+        {
+            public override Task<AuthenticationState> GetAuthenticationStateAsync()
+            {
+                Interlocked.Increment(ref tracker._authenticationStateReads);
+                return Task.FromResult(new AuthenticationState(user));
+            }
+        }
+    }
 
     private static Task<FeatureResponse<TestResponse>> Success() =>
         Task.FromResult(FeatureResponse<TestResponse>.AsSuccess(new()));

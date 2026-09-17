@@ -14,7 +14,6 @@ namespace BlazorFeatures.Base.Server
     /// </summary>
     public sealed class ServerFeatureService(
         IAuthorizationService authorizationService,
-        IFeaturePrincipalProvider principalProvider,
         IEnumerable<IServerFeatureBehavior> behaviors,
         IHttpContextAccessor httpContextAccessor,
         IOptions<FeatureTelemetryOptions> telemetryOptions,
@@ -44,7 +43,7 @@ namespace BlazorFeatures.Base.Server
                     requestType,
                     request,
                     featureContext,
-                    token => principalProvider.GetPrincipalAsync(featureContext, token),
+                    featureContext.CallerContext.User,
                     httpContext);
 
                 var authorizationResponse = await AuthorizeAsync(

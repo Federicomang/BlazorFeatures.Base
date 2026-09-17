@@ -12,22 +12,33 @@ namespace BlazorFeatures.Base.Server
         public HttpContext HttpContext { get; }
 
         public HttpFeatureContext(HttpContext httpContext, IBaseFeatureRequest request, Guid? operationId = null)
-            : base(request, FeatureInvocationSource.Http, operationId)
+            : base(
+                request,
+                FeatureInvocationSource.Http,
+                operationId,
+                new FeatureCallerContext(httpContext.User))
         {
             HttpContext = httpContext;
             _customResults = new(ReferenceEqualityComparer.Instance);
             httpContext.Features.Set<IHttpFeatureContext>(this);
         }
 
-        private HttpFeatureContext(IBaseFeatureRequest request, HttpFeatureContext parent)
-            : base(request, parent)
+        private HttpFeatureContext(
+            IBaseFeatureRequest request,
+            HttpFeatureContext parent,
+            FeatureCallerContext? callerContext = null,
+            FeatureScopeLifetime? scopeLifetime = null)
+            : base(request, parent, callerContext, scopeLifetime)
         {
             HttpContext = parent.HttpContext;
             _customResults = parent._customResults;
         }
 
-        public override IFeatureContext CreateInvocationScope(IBaseFeatureRequest request) =>
-            new HttpFeatureContext(request, this);
+        public override IFeatureContext CreateInvocationScope(
+            IBaseFeatureRequest request,
+            FeatureCallerContext? callerContext = null,
+            FeatureScopeLifetime? scopeLifetime = null) =>
+            new HttpFeatureContext(request, this, callerContext, scopeLifetime);
 
         public void SetHttpResult(IBaseFeatureRequest owner, IResult result)
         {

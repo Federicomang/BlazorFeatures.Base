@@ -127,7 +127,7 @@ public class FeatureTelemetryTests
     {
         var services = new ServiceCollection();
         services.AddOptions<FeatureTelemetryOptions>();
-        services.AddSingleton<IFeatureService, FeatureService>();
+        services.AddScoped<IFeatureService, FeatureService>();
         configure(services);
         return services.BuildServiceProvider();
     }

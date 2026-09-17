@@ -24,7 +24,10 @@ namespace BlazorFeatures.Base.Server.Handler
             });
 
             options.Services.AddHttpContextAccessor();
-            options.Services.TryAddScoped<IFeaturePrincipalProvider, DefaultFeaturePrincipalProvider>();
+            options.Services.TryAddEnumerable(
+                ServiceDescriptor.Scoped<
+                    IFeatureCallerContextEnricher,
+                    AuthenticationFeatureCallerContextEnricher>());
             options.Services.TryAddScoped<IServerFeatureService, ServerFeatureService>();
         }
     }

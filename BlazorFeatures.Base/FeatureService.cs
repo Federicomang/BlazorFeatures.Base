@@ -10,11 +10,15 @@ using System.Diagnostics;
 
 namespace BlazorFeatures.Base
 {
-    public class FeatureService(IServiceProvider sp) : IFeatureService
+    public class FeatureService(
+        IServiceProvider sp,
+        IEnumerable<IFeatureCallerContextEnricher> callerContextEnrichers) : IFeatureService
     {
         private static readonly EventId FeatureStartedEvent = new(1000, "FeatureStarted");
         private static readonly EventId FeatureCompletedEvent = new(1001, "FeatureCompleted");
         private static readonly EventId FeatureFailedEvent = new(1002, "FeatureFailed");
+        private static readonly EventId DeferredOperationFailedEvent = new(1003, "DeferredOperationFailed");
+        private static readonly EventId DeferredScopeDisposeFailedEvent = new(1004, "DeferredScopeDisposeFailed");
 
         public record EmptyResponse();
 
@@ -61,31 +65,51 @@ namespace BlazorFeatures.Base
         private async Task<FeatureResponse<Response>> Run<Response>(Type requestType, IBaseFeatureRequest<Response> request, IFeatureContext? featureContext, CancellationToken cancellationToken = default) where Response : class
         {
             Guid? parentNodeId = null;
-            if (featureContext is null)
+            var isNestedInvocation = featureContext != null
+                && featureContext.FeatureChain.ContainsKey(featureContext.NodeId);
+            var reuseParentServiceScope = false;
+
+            if (!isNestedInvocation)
             {
-                featureContext = new BaseFeatureContext(request, Constants.IsClientEnvironment
-                    ? FeatureInvocationSource.Client
-                    : FeatureInvocationSource.Server);
+                var callerContext = await CaptureCallerContextAsync(
+                    featureContext?.CallerContext,
+                    cancellationToken);
+                featureContext = featureContext == null
+                    ? new BaseFeatureContext(
+                        request,
+                        Constants.IsClientEnvironment
+                            ? FeatureInvocationSource.Client
+                            : FeatureInvocationSource.Server,
+                        callerContext: callerContext)
+                    : featureContext.CreateInvocationScope(request, callerContext);
             }
             else
             {
-                if (featureContext.FeatureChain.ContainsKey(featureContext.NodeId))
-                {
-                    parentNodeId = featureContext.NodeId;
-                }
-                featureContext = featureContext.CreateInvocationScope(request);
+                parentNodeId = featureContext!.NodeId;
+                reuseParentServiceScope = featureContext.UseSameServiceScope;
+                featureContext = featureContext.CreateInvocationScope(
+                    request,
+                    scopeLifetime: reuseParentServiceScope
+                        ? featureContext.ScopeLifetime
+                        : null);
             }
 
             var chainDepth = GetChainDepth(featureContext, parentNodeId);
+            AsyncServiceScope? ownedScope = null;
+            var serviceProvider = sp;
+            if (!reuseParentServiceScope)
+            {
+                ownedScope = sp.CreateAsyncScope();
+                serviceProvider = ownedScope.Value.ServiceProvider;
+            }
 
-            var scope = sp.CreateAsyncScope();
+            ILogger<FeatureService> logger = NullLogger<FeatureService>.Instance;
 
             try
             {
-                var serviceProvider = scope.ServiceProvider;
                 var options = serviceProvider.GetService<IOptions<FeatureTelemetryOptions>>()?.Value
                 ?? new FeatureTelemetryOptions();
-                var logger = serviceProvider.GetService<ILogger<FeatureService>>()
+                logger = serviceProvider.GetService<ILogger<FeatureService>>()
                     ?? NullLogger<FeatureService>.Instance;
                 var renderTarget = Constants.IsClientEnvironment
                     ? RenderType.Client
@@ -263,7 +287,63 @@ namespace BlazorFeatures.Base
             }
             finally
             {
-                await scope.DisposeAsync();
+                if (ownedScope is { } scope)
+                {
+                    var hasDeferredOperations = featureContext.ScopeLifetime.HasDeferredOperations;
+                    var completion = featureContext.ScopeLifetime.CompleteRegistration();
+                    if (!hasDeferredOperations)
+                        await scope.DisposeAsync();
+                    else
+                        _ = DisposeScopeWhenCompletedAsync(completion, scope, logger);
+                }
+            }
+        }
+
+        private static async Task DisposeScopeWhenCompletedAsync(
+            Task waiter,
+            AsyncServiceScope scope,
+            ILogger<FeatureService> logger)
+        {
+            try
+            {
+                await waiter.ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                TryLogDeferredFailure(
+                    logger,
+                    DeferredOperationFailedEvent,
+                    exception,
+                    "A deferred feature operation failed before scope disposal");
+            }
+
+            try
+            {
+                await scope.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                TryLogDeferredFailure(
+                    logger,
+                    DeferredScopeDisposeFailedEvent,
+                    exception,
+                    "The deferred feature scope failed during disposal");
+            }
+        }
+
+        private static void TryLogDeferredFailure(
+            ILogger<FeatureService> logger,
+            EventId eventId,
+            Exception exception,
+            string message)
+        {
+            try
+            {
+                logger.LogError(eventId, exception, "{FeatureScopeMessage}", message);
+            }
+            catch
+            {
+                // A detached cleanup task must never surface an unobserved exception.
             }
         }
 
@@ -281,6 +361,18 @@ namespace BlazorFeatures.Base
         }
 
         private static string FormatType(Type type) => type.FullName ?? type.Name;
+
+        private async ValueTask<FeatureCallerContext> CaptureCallerContextAsync(
+            FeatureCallerContext? initialContext,
+            CancellationToken cancellationToken)
+        {
+            var builder = initialContext == null
+                ? new FeatureCallerContextBuilder()
+                : new FeatureCallerContextBuilder(initialContext);
+            foreach (var enricher in callerContextEnrichers)
+                await enricher.EnrichAsync(builder, cancellationToken);
+            return builder.Build();
+        }
 
         private static int GetChainDepth(IFeatureContext featureContext, Guid? parentNodeId)
         {
